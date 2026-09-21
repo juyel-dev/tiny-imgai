@@ -123,7 +123,7 @@ async function groupedPdfResources(){
 async function cacheTrainingDataset(groups){
   const allPairs=[...groups.values()].flat();
   let ready=0,created=0;
-  const cacheSize=32;
+  const cacheSize=64;
   $("#trainStatus").textContent="Checking page cache";
   for(const groupPairs of groups.values()){
     const first=groupPairs[0];
