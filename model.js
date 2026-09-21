@@ -152,6 +152,24 @@ export class TinyImageModel{
     this.architecture="3×3 Conv 3→8 → ReLU → 3×3 Conv 8→3 + residual skip";
   }
   initWeights(){for(let i=0;i<PARAMS;i++)this.weights[i]=(Math.random()-0.5)*0.02}
+  exportWeights(){
+    return JSON.stringify({
+      format:"tiny-imgai-model",
+      version:this.version,
+      architecture:this.architecture,
+      parameterCount:this.parameterCount,
+      weights:Array.from(this.weights),
+      exportedAt:new Date().toISOString()
+    },null,0);
+  }
+  loadWeights(saved){
+    if(!Array.isArray(saved?.weights)||saved.weights.length!==PARAMS){
+      throw new Error(`Invalid model file: expected ${PARAMS} weights, got ${saved?.weights?.length??"none"}.`);
+    }
+    this.weights=new Float32Array(saved.weights);
+    this.version=Number.isFinite(saved.version)?saved.version:0;
+    this.m=new Float32Array(PARAMS);this.v=new Float32Array(PARAMS);this.optimizerStep=0;
+  }
   async init(){
     if(!navigator.gpu)throw new Error("WebGPU is not available in this browser.");
     this.adapter=await navigator.gpu.requestAdapter();if(!this.adapter)throw new Error("No WebGPU adapter found.");

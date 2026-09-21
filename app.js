@@ -226,6 +226,44 @@ testBtn.onclick=async()=>{
   }catch(error){$("#outputPreview").textContent=error.message}
 };
 
+$("#exportBtn").onclick=async()=>{
+  const btn=$("#exportBtn");
+  try{
+    const m=await ensureModel();
+    const blob=new Blob([m.exportWeights()],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=`tiny-imgai-model-v${m.version}.json`;a.click();
+    URL.revokeObjectURL(url);
+  }catch(error){
+    btn.textContent="Export failed";
+    setTimeout(()=>btn.textContent="Export model",1500);
+    console.error(error);
+  }
+};
+$("#importBtn").onclick=()=>$("#importInput").click();
+$("#importInput").onchange=async e=>{
+  const file=e.target.files[0];
+  e.target.value="";
+  if(!file)return;
+  const btn=$("#importBtn");
+  try{
+    const saved=JSON.parse(await file.text());
+    const m=await ensureModel();
+    m.loadWeights(saved);
+    state.modelVersion=m.version;state.weights=[...m.weights];
+    saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
+    $("#version").textContent="v"+m.version;
+    $("#modelBadge").textContent="MODEL v"+m.version;
+    btn.textContent="Imported v"+m.version;
+    setTimeout(()=>btn.textContent="Import model",1500);
+  }catch(error){
+    btn.textContent=error.message.slice(0,40);
+    setTimeout(()=>btn.textContent="Import model",2000);
+    console.error(error);
+  }
+};
+
 (async()=>{
   try{await ensureModel()}catch(error){$("#engineStatus").textContent="WebGPU unavailable"}
   render();updatePairButton();

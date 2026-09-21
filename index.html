@@ -97,8 +97,9 @@
       <div class="model-info"><span>Architecture</span><b id="modelArch">—</b></div>
       <div class="model-info"><span>Runtime</span><b>WebGPU</b></div>
       <hr>
-      <button class="secondary" disabled>Export model</button>
-      <button class="ghost" disabled>Import model</button>
+      <button class="secondary" id="exportBtn">Export model</button>
+      <button class="ghost" id="importBtn">Import model</button>
+      <input id="importInput" type="file" accept="application/json,.json" hidden>
     </aside>
   </main>
 
