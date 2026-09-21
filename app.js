@@ -76,6 +76,9 @@ $("#pairPdfBtn").onclick=async()=>{
     state.pairs.push(...result.pairs);
     saveState({pairCount:state.pairs.length});
     btn.textContent=result.pairs.length+" pairs created";
+    originalFile=null;processedFile=null;originalPages=0;processedPages=0;
+    $("#originalFile").textContent="—";$("#originalPages").textContent="0 pages";$("#originalHint").textContent="Drop the original notes PDF";$("#originalDropzone").classList.remove("is-ready");
+    $("#processedFile").textContent="—";$("#processedPages").textContent="0 pages";$("#processedHint").textContent="Drop the optimized / processed PDF";$("#processedDropzone").classList.remove("is-ready");
     render();
   }catch(error){
     btn.disabled=false;
@@ -125,32 +128,40 @@ trainBtn.onclick=async()=>{
   $("#lossHint").textContent="real WebGPU loss";
   try{
     const m=await ensureModel();
-    const first=state.pairs.find(p=>p.originalDocId&&p.processedDocId);
-    if(!first)throw new Error("No PDF-backed training pairs found.");
-    const [od,pd]=await Promise.all([getDocument(first.originalDocId),getDocument(first.processedDocId)]);
-    const [opdf,ppdf]=await Promise.all([openPdf(od.blob),openPdf(pd.blob)]);
+    const groups=new Map();
+    for(const p of state.pairs.filter(p=>p.originalDocId&&p.processedDocId)){
+      const key=p.originalDocId+"|"+p.processedDocId;
+      if(!groups.has(key))groups.set(key,[]);
+      groups.get(key).push(p);
+    }
+    if(!groups.size)throw new Error("No PDF-backed training pairs found.");
     const epochs=20,batchSize=8;
-    const batches=Math.ceil(state.pairs.length/batchSize);
+    const totalBatches=[...groups.values()].reduce((n,g)=>n+Math.ceil(g.length/batchSize),0);
     for(let epoch=1;epoch<=epochs;epoch++){
-      let epochLoss=0;
-      for(let start=0,batchIndex=0;start<state.pairs.length;start+=batchSize,batchIndex++){
-        const batchPairs=state.pairs.slice(start,start+batchSize);
-        const {inputs,targets}=await prepareBatch(opdf,ppdf,batchPairs);
-        const result=await m.trainBatch(inputs,targets);
-        m.applyGradient(result.grad);
-        epochLoss+=result.loss*batchPairs.length;
-        $("#step").textContent=(epoch-1)*batches+batchIndex+1;
-        $("#epoch").textContent=`${epoch} / ${epochs}`;
-        $("#loss").textContent=result.loss.toFixed(5);
-        $("#progress").style.width=((batchIndex+1)/batches*100)+"%";
-        $("#trainStatus").textContent=`Training batch ${batchIndex+1}/${batches}`;
-        await new Promise(requestAnimationFrame);
+      let epochLoss=0,processedPairs=0,completedBatches=0;
+      for(const groupPairs of groups.values()){
+        const first=groupPairs[0];
+        const [od,pd]=await Promise.all([getDocument(first.originalDocId),getDocument(first.processedDocId)]);
+        const [opdf,ppdf]=await Promise.all([openPdf(od.blob),openPdf(pd.blob)]);
+        for(let start=0;start<groupPairs.length;start+=batchSize){
+          const batchPairs=groupPairs.slice(start,start+batchSize);
+          const {inputs,targets}=await prepareBatch(opdf,ppdf,batchPairs);
+          const result=await m.trainBatch(inputs,targets);
+          m.applyGradient(result.grad);
+          epochLoss+=result.loss*batchPairs.length;processedPairs+=batchPairs.length;completedBatches++;
+          $("#step").textContent=(epoch-1)*totalBatches+completedBatches;
+          $("#epoch").textContent=`${epoch} / ${epochs}`;
+          $("#loss").textContent=result.loss.toFixed(5);
+          $("#progress").style.width=(completedBatches/totalBatches*100)+"%";
+          $("#trainStatus").textContent=`Training batch ${completedBatches}/${totalBatches}`;
+          await new Promise(requestAnimationFrame);
+        }
+        await opdf.destroy();await ppdf.destroy();
       }
-      const avg=epochLoss/state.pairs.length;
+      const avg=epochLoss/processedPairs;
       state.losses.push(avg);drawLoss();$("#loss").textContent=avg.toFixed(5);
       saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
     }
-    await opdf.destroy();await ppdf.destroy();
     m.version++;
     state.modelVersion=m.version;state.weights=[...m.weights];
     state.training=false;
