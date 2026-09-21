@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>tiny-imgai — Training Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">T</span><div><strong>tiny-imgai</strong><small>Image model training lab</small></div></div>
+    <div class="status"><i></i><span id="engineStatus">Browser engine ready</span></div>
+  </header>
+
+  <main class="lab">
+    <section class="workspace">
+      <div class="section-head">
+        <div><div class="eyebrow">01 · DATASET</div><h1>Training data</h1></div>
+        <div class="metric"><b id="pairCount">0</b><span>pairs</span></div>
+      </div>
+
+      <div class="dropzone" id="dropzone">
+        <div class="drop-icon">+</div>
+        <strong>Add image pair</strong>
+        <span>Original + optimized target</span>
+        <button id="addPair">Choose images</button>
+        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      </div>
+
+      <div class="dataset-list" id="datasetList">
+        <div class="empty">No training pairs yet.</div>
+      </div>
+    </section>
+
+    <section class="workspace training">
+      <div class="section-head">
+        <div><div class="eyebrow">02 · TRAIN</div><h2>Model training</h2></div>
+        <div class="model-badge" id="modelBadge">MODEL v0</div>
+      </div>
+
+      <div class="training-card">
+        <div class="train-row"><span>Dataset</span><b id="trainDataset">0 pairs</b></div>
+        <div class="train-row"><span>Epoch</span><b id="epoch">0 / 20</b></div>
+        <div class="progress"><span id="progress"></span></div>
+        <div class="train-stats"><div><small>Loss</small><strong id="loss">—</strong></div><div><small>Step</small><strong id="step">0</strong></div><div><small>Status</small><strong id="trainStatus">Idle</strong></div></div>
+        <button class="primary" id="trainBtn" disabled>Start training</button>
+      </div>
+
+      <div class="loss-card">
+        <div class="card-title"><span>Loss</span><small id="lossHint">waiting for training</small></div>
+        <svg id="lossGraph" viewBox="0 0 600 170" preserveAspectRatio="none" aria-label="Training loss graph">
+          <line x1="0" y1="145" x2="600" y2="145" class="grid"/>
+          <line x1="0" y1="85" x2="600" y2="85" class="grid"/>
+          <line x1="0" y1="25" x2="600" y2="25" class="grid"/>
+          <polyline id="lossLine" points="" fill="none" stroke="currentColor" stroke-width="3"/>
+        </svg>
+      </div>
+    </section>
+
+    <section class="workspace preview">
+      <div class="section-head">
+        <div><div class="eyebrow">03 · TEST</div><h2>Live preview</h2></div>
+        <span class="muted">New image → model → output</span>
+      </div>
+
+      <div class="preview-grid">
+        <div class="image-panel"><label>INPUT</label><div class="image-box checker" id="inputPreview">Upload an image</div></div>
+        <div class="arrow">→</div>
+        <div class="image-panel"><label>AI OUTPUT</label><div class="image-box checker" id="outputPreview">Model output</div></div>
+        <div class="image-panel"><label>TARGET</label><div class="image-box checker" id="targetPreview">Optimized reference</div></div>
+      </div>
+      <button class="secondary" id="testBtn" disabled>Test model</button>
+    </section>
+
+    <aside class="model-panel">
+      <div class="eyebrow">MODEL</div>
+      <h2>tiny-imgai</h2>
+      <div class="model-info"><span>Version</span><b id="version">v0</b></div>
+      <div class="model-info"><span>Parameters</span><b>—</b></div>
+      <div class="model-info"><span>Model size</span><b>—</b></div>
+      <div class="model-info"><span>Runtime</span><b>WebGPU</b></div>
+      <hr>
+      <button class="secondary" disabled>Export model</button>
+      <button class="ghost" disabled>Import model</button>
+    </aside>
+  </main>
+
+  <footer>tiny-imgai · local-first · your images stay in the browser</footer>
+  <script src="app.js"></script>
+</body>
+</html>
