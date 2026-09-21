@@ -59,6 +59,7 @@ export class TinyImageModel{
   constructor(saved){
     this.version=saved?.version??0;this.runtime="WebGPU";this.parameterCount=12;
     this.weights=new Float32Array(saved?.weights?.length===12?saved.weights:[8,8,8,-12,8,8,8,-12,8,8,8,-12]);
+    this.m=new Float32Array(12); this.v=new Float32Array(12); this.optimizerStep=0;
   }
   async init(){
     if(!navigator.gpu)throw new Error("WebGPU is not available in this browser.");
@@ -85,7 +86,17 @@ export class TinyImageModel{
     for(const b of [xBuf,tBuf,wBuf,accBuf,pBuf,read])b.destroy();
     return {loss,grad};
   }
-  applyGradient(grad,lr=.8){for(let i=0;i<12;i++)this.weights[i]-=lr*grad[i]}
+  applyGradient(grad,lr=.03){
+    this.optimizerStep++;
+    const b1=.9,b2=.999,eps=1e-8;
+    for(let i=0;i<12;i++){
+      this.m[i]=b1*this.m[i]+(1-b1)*grad[i];
+      this.v[i]=b2*this.v[i]+(1-b2)*grad[i]*grad[i];
+      const mh=this.m[i]/(1-Math.pow(b1,this.optimizerStep));
+      const vh=this.v[i]/(1-Math.pow(b2,this.optimizerStep));
+      this.weights[i]-=lr*mh/(Math.sqrt(vh)+eps);
+    }
+  }
   async predict(canvas){
     const x=toRGBFloats(canvas),n=canvas.width*canvas.height,device=this.device;
     const xBuf=device.createBuffer({size:bufferSize(x.byteLength),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
