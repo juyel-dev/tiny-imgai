@@ -34,9 +34,9 @@ export function imageToCanvas(source,size=64){
 }
 
 export class TinyImageModel {
-  constructor(){
-    this.version=1; this.runtime="WebGPU"; this.parameterCount=12;
-    this.weights=new Float32Array([8,8,8,-12,8,8,8,-12,8,8,8,-12]);
+  constructor(saved){
+    this.version=saved?.version ?? 0; this.runtime="WebGPU"; this.parameterCount=12;
+    this.weights=new Float32Array(saved?.weights?.length===12?saved.weights:[8,8,8,-12,8,8,8,-12,8,8,8,-12]);
   }
   async init(){
     if(!navigator.gpu) throw new Error("WebGPU is not available in this browser.");
