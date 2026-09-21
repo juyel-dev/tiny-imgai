@@ -105,6 +105,7 @@ async function ensureModel(){
     $("#modelBadge").textContent="MODEL v"+model.version;
     $("#modelParams").textContent=model.parameterCount;
     $("#modelSize").textContent=(model.parameterCount*4)+" B";
+    $("#modelArch").textContent=model.architecture;
   }
   return model;
 }
