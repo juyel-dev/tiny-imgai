@@ -1,4 +1,4 @@
-import { addPdfDataset, getDocument, listPairs } from "./dataset.js";
+import { addPdfDataset, getCachedPage, cachePage, getDocument, listPairs } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
 import { TinyImageModel, imageToCanvas, canvasToRGB8 } from "./model.js";
 import { openPdf, pdfPageCount, renderPdfPage } from "./pdf.js";
@@ -109,46 +109,78 @@ async function ensureModel(){
   return model;
 }
 
-async function prepareBatch(pdfOriginal,pdfProcessed,pairs){
-  const inputs=[],targets=[];
-  for(const p of pairs){
-    const [a,b]=await Promise.all([
-      renderPdfPage(pdfOriginal,p.originalPage,32),
-      renderPdfPage(pdfProcessed,p.processedPage,32)
-    ]);
-    inputs.push(canvasToRGB8(a));targets.push(canvasToRGB8(b));
+async function groupedPdfResources(){
+  const groups=new Map();
+  for(const p of state.pairs.filter(p=>p.originalDocId&&p.processedDocId)){
+    const key=p.originalDocId+"|"+p.processedDocId;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(p);
   }
-  return {inputs,targets};
+  return groups;
 }
 
+async function cacheTrainingDataset(groups){
+  const allPairs=[...groups.values()].flat();
+  let ready=0,created=0;
+  const cacheSize=32;
+  $("#trainStatus").textContent="Checking page cache";
+  for(const groupPairs of groups.values()){
+    const first=groupPairs[0];
+    const [od,pd]=await Promise.all([getDocument(first.originalDocId),getDocument(first.processedDocId)]);
+    const [opdf,ppdf]=await Promise.all([openPdf(od.blob),openPdf(pd.blob)]);
+    for(const p of groupPairs){
+      const cached=await getCachedPage(p.uuid);
+      if(cached?.size===cacheSize && cached.original && cached.target){
+        ready++;
+      }else{
+        const [a,b]=await Promise.all([
+          renderPdfPage(opdf,p.originalPage,cacheSize),
+          renderPdfPage(ppdf,p.processedPage,cacheSize)
+        ]);
+        await cachePage(p.uuid,{size:cacheSize,original:canvasToRGB8(a),target:canvasToRGB8(b)});
+        ready++;created++;
+      }
+      $("#trainStatus").textContent=`Caching pages ${ready}/${allPairs.length}`;
+      $("#progress").style.width=(ready/allPairs.length*100)+"%";
+      await new Promise(requestAnimationFrame);
+    }
+    await opdf.destroy();await ppdf.destroy();
+  }
+  return {total:allPairs.length,created};
+}
+
+async function readCachedBatch(batchPairs){
+  return Promise.all(batchPairs.map(async p=>{
+    const cached=await getCachedPage(p.uuid);
+    if(!cached?.original||!cached?.target)throw new Error(`Missing cached tensors for pair ${p.uuid}`);
+    return {original:new Uint8Array(cached.original),target:new Uint8Array(cached.target)};
+  }));
+}
 trainBtn.onclick=async()=>{
   if(state.training||!state.pairs.length)return;
   state.training=true;state.losses=[];render();
-  $("#trainStatus").textContent="Opening PDFs";
+  $("#trainStatus").textContent="Starting";
   $("#lossHint").textContent="real WebGPU loss";
   try{
     const m=await ensureModel();
-    const groups=new Map();
-    for(const p of state.pairs.filter(p=>p.originalDocId&&p.processedDocId)){
-      const key=p.originalDocId+"|"+p.processedDocId;
-      if(!groups.has(key))groups.set(key,[]);
-      groups.get(key).push(p);
-    }
+    const groups=await groupedPdfResources();
     if(!groups.size)throw new Error("No PDF-backed training pairs found.");
+
+    const cache=await cacheTrainingDataset(groups);
+    $("#lossHint").textContent=cache.created?cache.created+" pages cached":"cache hit — no PDF rendering needed";
+
     const epochs=20,batchSize=8;
     const totalBatches=[...groups.values()].reduce((n,g)=>n+Math.ceil(g.length/batchSize),0);
     for(let epoch=1;epoch<=epochs;epoch++){
       let epochLoss=0,processedPairs=0,completedBatches=0;
       for(const groupPairs of groups.values()){
-        const first=groupPairs[0];
-        const [od,pd]=await Promise.all([getDocument(first.originalDocId),getDocument(first.processedDocId)]);
-        const [opdf,ppdf]=await Promise.all([openPdf(od.blob),openPdf(pd.blob)]);
         for(let start=0;start<groupPairs.length;start+=batchSize){
           const batchPairs=groupPairs.slice(start,start+batchSize);
-          const {inputs,targets}=await prepareBatch(opdf,ppdf,batchPairs);
-          const result=await m.trainBatch(inputs,targets);
+          const batch=await readCachedBatch(batchPairs);
+          const result=await m.trainBatch(batch.map(x=>x.original),batch.map(x=>x.target));
           m.applyGradient(result.grad);
-          epochLoss+=result.loss*batchPairs.length;processedPairs+=batchPairs.length;completedBatches++;
+          epochLoss+=result.loss*batchPairs.length;
+          processedPairs+=batchPairs.length;completedBatches++;
           $("#step").textContent=(epoch-1)*totalBatches+completedBatches;
           $("#epoch").textContent=`${epoch} / ${epochs}`;
           $("#loss").textContent=result.loss.toFixed(5);
@@ -156,7 +188,6 @@ trainBtn.onclick=async()=>{
           $("#trainStatus").textContent=`Training batch ${completedBatches}/${totalBatches}`;
           await new Promise(requestAnimationFrame);
         }
-        await opdf.destroy();await ppdf.destroy();
       }
       const avg=epochLoss/processedPairs;
       state.losses.push(avg);drawLoss();$("#loss").textContent=avg.toFixed(5);
