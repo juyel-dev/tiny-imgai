@@ -69,8 +69,11 @@ export class TinyImageModel{
     this.trainPipeline=this.device.createComputePipeline({layout:"auto",compute:{module:this.device.createShaderModule({code:TRAIN_WGSL}),entryPoint:"main"}});
     return this;
   }
-  async trainPair(inputCanvas,targetCanvas){
-    const x=toRGBFloats(inputCanvas),t=toRGBFloats(targetCanvas),n=inputCanvas.width*inputCanvas.height,device=this.device;
+  async trainBatch(inputs,targets){
+    const xs=inputs.map(toRGBFloats),ts=targets.map(toRGBFloats);
+    const xLength=xs.reduce((n,a)=>n+a.length,0),x=new Float32Array(xLength),t=new Float32Array(xLength);
+    let offset=0; for(let i=0;i<xs.length;i++){x.set(xs[i],offset);t.set(ts[i],offset);offset+=xs[i].length}
+    const n=xLength/3,device=this.device;
     const xBuf=device.createBuffer({size:bufferSize(x.byteLength),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     const tBuf=device.createBuffer({size:bufferSize(t.byteLength),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     const wBuf=device.createBuffer({size:this.weights.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
