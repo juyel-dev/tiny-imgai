@@ -169,7 +169,7 @@ trainBtn.onclick=async()=>{
     const cache=await cacheTrainingDataset(groups);
     $("#lossHint").textContent=cache.created?cache.created+" pages cached":"cache hit — no PDF rendering needed";
 
-    const epochs=20,batchSize=8;
+    const epochs=20,batchSize=32;
     const totalBatches=[...groups.values()].reduce((n,g)=>n+Math.ceil(g.length/batchSize),0);
     for(let epoch=1;epoch<=epochs;epoch++){
       let epochLoss=0,processedPairs=0,completedBatches=0;
