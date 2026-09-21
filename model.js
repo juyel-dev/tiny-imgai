@@ -52,7 +52,7 @@ export function canvasToRGB8(canvas){
   return out;
 }
 function toRGBFloats(canvas){const u8=canvasToRGB8(canvas),out=new Float32Array(u8.length);for(let i=0;i<u8.length;i++)out[i]=u8[i]/255;return out}
-function arraysToFloats(arrays){
+function packRGB8Arrays(arrays){
   const total=arrays.reduce((n,a)=>n+a.length,0),out=new Float32Array(total);let off=0;
   for(const a of arrays){for(let i=0;i<a.length;i++)out[off+i]=a[i]/255;off+=a.length}
   return out;
@@ -76,11 +76,10 @@ export class TinyImageModel{
     return this;
   }
   async trainBatch(inputs,targets){
-    const xs=inputs[0] instanceof Uint8Array?arraysToFloats(inputs):inputs.map(toRGBFloats);
-    const ts=targets[0] instanceof Uint8Array?arraysToFloats(targets):targets.map(toRGBFloats);
-    const xLength=xs.reduce((n,a)=>n+a.length,0),x=new Float32Array(xLength),t=new Float32Array(xLength);
-    let offset=0; for(let i=0;i<xs.length;i++){x.set(xs[i],offset);t.set(ts[i],offset);offset+=xs[i].length}
-    const n=xLength/3,device=this.device;
+    const x=inputs[0] instanceof Uint8Array?packRGB8Arrays(inputs):inputs.reduce((out,a)=>{const f=toRGBFloats(a);const next=new Float32Array(out.length+f.length);next.set(out);next.set(f,out.length);return next},new Float32Array());
+    const t=targets[0] instanceof Uint8Array?packRGB8Arrays(targets):targets.reduce((out,a)=>{const f=toRGBFloats(a);const next=new Float32Array(out.length+f.length);next.set(out);next.set(f,out.length);return next},new Float32Array());
+    if(x.length!==t.length)throw new Error("Input and target batch sizes do not match.");
+    const xLength=x.length,n=xLength/3,device=this.device;
     const xBuf=device.createBuffer({size:bufferSize(x.byteLength),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     const tBuf=device.createBuffer({size:bufferSize(t.byteLength),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     const wBuf=device.createBuffer({size:this.weights.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
