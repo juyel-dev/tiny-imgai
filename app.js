@@ -64,26 +64,19 @@ trainBtn.onclick=async()=>{
     $("#trainStatus").textContent="Preparing dataset";
     const prepared=await Promise.all(state.pairs.map(async p=>{
       const [input,target]=await Promise.all([dataURLToImage(p.original),dataURLToImage(p.target)]);
-      return {a:imageToCanvas(input,64),b:imageToCanvas(target,64)};
+      return {a:imageToCanvas(input,32),b:imageToCanvas(target,32)};
     }));
+    const inputs=prepared.map(x=>x.a),targets=prepared.map(x=>x.b);
     for(let epoch=1;epoch<=epochs;epoch++){
-      let epochLoss=0;
-      for(let i=0;i<prepared.length;i++){
-        const {a,b}=prepared[i];
-        const result=await m.trainPair(a,b);
-        m.applyGradient(result.grad);
-        epochLoss+=result.loss;
-        $("#step").textContent=((epoch-1)*state.pairs.length+i+1);
-        $("#epoch").textContent=`${epoch} / ${epochs}`;
-        $("#loss").textContent=result.loss.toFixed(5);
-        $("#progress").style.width=(i+1)/state.pairs.length*100+"%";
-        $("#trainStatus").textContent=`Training ${i+1}/${state.pairs.length}`;
-        await new Promise(requestAnimationFrame);
-      }
-      const avg=epochLoss/state.pairs.length;
-      state.losses.push(avg); drawLoss();
-      $("#loss").textContent=avg.toFixed(5);
+      $("#trainStatus").textContent=`Training epoch ${epoch}/${epochs}`;
+      const result=await m.trainBatch(inputs,targets);
+      m.applyGradient(result.grad);
+      state.losses.push(result.loss); drawLoss();
+      $("#step").textContent=epoch;
+      $("#epoch").textContent=`${epoch} / ${epochs}`;
+      $("#loss").textContent=result.loss.toFixed(5);
       $("#progress").style.width=(epoch/epochs*100)+"%";
+      await new Promise(requestAnimationFrame);
     }
     m.version++;
     state.training=false;
