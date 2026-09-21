@@ -44,7 +44,7 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>) {
   }
 }`;
 
-const SCALE=100000;
+const SCALE=10000;
 export function canvasToRGB8(canvas){
   const ctx=canvas.getContext("2d",{willReadFrequently:true}),d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
   const out=new Uint8Array(canvas.width*canvas.height*3);
@@ -64,7 +64,7 @@ function bufferSize(bytes){return Math.max(4,((bytes+3)>>2)<<2)}
 export class TinyImageModel{
   constructor(saved){
     this.version=saved?.version??0;this.runtime="WebGPU";this.parameterCount=12;
-    this.weights=new Float32Array(saved?.weights?.length===12?saved.weights:[8,8,8,-12,8,8,8,-12,8,8,8,-12]);
+    this.weights=new Float32Array(saved?.weights?.length===12?saved.weights:new Float32Array(12));
     this.m=new Float32Array(12); this.v=new Float32Array(12); this.optimizerStep=0;
   }
   async init(){
