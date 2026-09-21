@@ -1,8 +1,9 @@
 const DB_NAME="tiny-imgai";
-const DB_VERSION=3;
+const DB_VERSION=4;
 const PAIRS="pairs";
 const DOCS="documents";
 const META="meta";
+const PAGE_CACHE="pageCache";
 
 export function openDataset(){
   return new Promise((resolve,reject)=>{
@@ -12,6 +13,7 @@ export function openDataset(){
       if(!db.objectStoreNames.contains(PAIRS))db.createObjectStore(PAIRS,{keyPath:"uuid"});
       if(!db.objectStoreNames.contains(DOCS))db.createObjectStore(DOCS,{keyPath:"uuid"});
       if(!db.objectStoreNames.contains(META))db.createObjectStore(META,{keyPath:"key"});
+      if(!db.objectStoreNames.contains(PAGE_CACHE))db.createObjectStore(PAGE_CACHE,{keyPath:"uuid"});
     };
     req.onsuccess=()=>resolve(req.result);
     req.onerror=()=>reject(req.error);
@@ -56,5 +58,29 @@ export async function listPairs(){
     const req=db.transaction(PAIRS).objectStore(PAIRS).getAll();
     req.onsuccess=()=>resolve(req.result.sort((a,b)=>(Number(a.pageNumber)||0)-(Number(b.pageNumber)||0)));
     req.onerror=()=>reject(req.error);
+  });
+}
+
+export async function getCachedPage(uuid){
+  const db=await openDataset();
+  return new Promise((resolve,reject)=>{
+    const req=db.transaction(PAGE_CACHE).objectStore(PAGE_CACHE).get(uuid);
+    req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);
+  });
+}
+export async function cachePage(uuid,{size,original,target}){
+  const db=await openDataset();
+  const record={uuid,size,original,target,bytes:original.byteLength+target.byteLength,cachedAt:new Date().toISOString()};
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(PAGE_CACHE,"readwrite");
+    tx.objectStore(PAGE_CACHE).put(record);
+    tx.oncomplete=()=>resolve(record);tx.onerror=()=>reject(tx.error);
+  });
+}
+export async function clearPageCache(){
+  const db=await openDataset();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(PAGE_CACHE,"readwrite");tx.objectStore(PAGE_CACHE).clear();
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
   });
 }
