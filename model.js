@@ -6,7 +6,7 @@ struct Params { n: u32 };
 @group(0) @binding(3) var<storage, read_write> acc: array<atomic<i32>>;
 @group(0) @binding(4) var<uniform> p: Params;
 
-const SCALE:f32 = 100000.0;
+const SCALE:f32 = 10000.0;
 fn sigmoid(v:f32)->f32 { return 1.0/(1.0+exp(-v)); }
 
 @compute @workgroup_size(64)
