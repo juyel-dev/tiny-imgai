@@ -22,8 +22,14 @@ export async function openPdf(blob){
 export async function pdfPageCount(blob){
   const pdf=await openPdf(blob);
   const count=pdf.numPages;
-  await pdf.destroy();
+  await disposePdf(pdf);
   return count;
+}
+
+export async function disposePdf(pdf){
+  if(!pdf)return;
+  if(typeof pdf.destroy==="function"){await pdf.destroy();return;}
+  if(typeof pdf.cleanup==="function"){await pdf.cleanup();}
 }
 
 export async function renderPdfPage(pdf,pageNumber,size=32){
