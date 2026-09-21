@@ -1,18 +1,22 @@
 import { addPair, listPairs } from "./dataset.js";
-import { saveState } from "./storage.js";
-import { TinyImageModel } from "./model.js";
+import { loadState, saveState } from "./storage.js";
+import { TinyImageModel, imageToCanvas } from "./model.js";
 
-const state={pairs:await listPairs(),training:false,losses:[]};
+const state={pairs:await listPairs(),training:false,losses:[],...loadState()};
 const $=s=>document.querySelector(s);
 const pairCount=$("#pairCount"),trainDataset=$("#trainDataset"),datasetList=$("#datasetList"),trainBtn=$("#trainBtn"),testBtn=$("#testBtn");
+let model=null;
 
 function render(){
   pairCount.textContent=state.pairs.length;
   trainDataset.textContent=state.pairs.length+" pair"+(state.pairs.length===1?"":"s");
   trainBtn.disabled=state.pairs.length===0||state.training;
-  testBtn.disabled=state.pairs.length===0;
-  datasetList.innerHTML=state.pairs.length?state.pairs.slice(-8).reverse().map(p=>`<div class="pair"><span class="pair-id">${p.pageNumber} · ${p.name}</span><span class="pair-status">ready</span></div>`).join(""):'<div class="empty">No training pairs yet.</div>';
+  testBtn.disabled=state.pairs.length===0||state.training;
+  datasetList.innerHTML=state.pairs.length?state.pairs.slice(-8).reverse().map(p=>`<div class="pair"><span class="pair-id">#${p.pageNumber} · ${escapeHtml(p.name)}</span><span class="pair-status">ready</span></div>`).join(""):'<div class="empty">No training pairs yet.</div>';
 }
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fileToDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
+function dataURLToImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src})}
 async function addFiles(files){
   const imgs=[...files].filter(f=>f.type.startsWith("image/"));
   for(let i=0;i<imgs.length;i+=2){
@@ -23,7 +27,6 @@ async function addFiles(files){
   saveState({pairCount:state.pairs.length});
   render();
 }
-function fileToDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
 $("#addPair").onclick=()=>$("#fileInput").click();
 $("#fileInput").onchange=e=>addFiles(e.target.files);
 $("#dropzone").ondragover=e=>{e.preventDefault();$("#dropzone").style.borderColor="#66717d"};
@@ -36,20 +39,80 @@ function drawLoss(){
   const pts=state.losses.map((v,i)=>`${i/(state.losses.length-1||1)*600},${145-((v-min)/range)*120}`).join(" ");
   $("#lossLine").setAttribute("points",pts);
 }
-trainBtn.onclick=()=>{
-  if(state.training)return;
-  state.training=true;state.losses=[];render();$("#trainStatus").textContent="Training";
-  const worker=new Worker("./worker.js",{type:"module"});
-  worker.onmessage=e=>{
-    const d=e.data;
-    if(d.type==="progress"){
-      state.losses.push(d.loss);$("#step").textContent=d.step*100;$("#epoch").textContent=`${d.epoch} / ${d.epochs}`;$("#loss").textContent=d.loss.toFixed(3);$("#progress").style.width=(d.epoch/d.epochs*100)+"%";$("#lossHint").textContent="live";drawLoss();
-    } else { state.training=false;$("#trainStatus").textContent="Complete";$("#modelBadge").textContent="MODEL v1";$("#version").textContent="v1";render();worker.terminate(); }
-  };
-  worker.onerror=()=>{state.training=false;$("#trainStatus").textContent="Error";render();worker.terminate()};
-  worker.postMessage({type:"train",epochs:20,version:1});
+
+async function ensureModel(){
+  if(!model){
+    model=new TinyImageModel();
+    await model.init();
+    $("#engineStatus").textContent="WebGPU active";
+    $("#version").textContent="v"+model.version;
+    document.querySelector(".model-info b:nth-of-type(1)");
+    $("#modelBadge").textContent="MODEL v"+model.version;
+    $("#modelParams") && ($("#modelParams").textContent=model.parameterCount);
+    $("#modelSize") && ($("#modelSize").textContent=(model.parameterCount*4)+" B");
+  }
+  return model;
+}
+
+trainBtn.onclick=async()=>{
+  if(state.training||!state.pairs.length)return;
+  state.training=true;state.losses=[];render();
+  $("#trainStatus").textContent="Starting";
+  $("#lossHint").textContent="real loss";
+  try{
+    const m=await ensureModel();
+    const epochs=20;
+    for(let epoch=1;epoch<=epochs;epoch++){
+      let epochLoss=0;
+      for(let i=0;i<state.pairs.length;i++){
+        const p=state.pairs[i];
+        const input=await dataURLToImage(p.original);
+        const target=await dataURLToImage(p.target);
+        const a=imageToCanvas(input,64), b=imageToCanvas(target,64);
+        const result=await m.trainPair(a,b);
+        m.applyGradient(result.grad,0.8);
+        epochLoss+=result.loss;
+        $("#step").textContent=((epoch-1)*state.pairs.length+i+1);
+        $("#epoch").textContent=`${epoch} / ${epochs}`;
+        $("#loss").textContent=result.loss.toFixed(5);
+        $("#progress").style.width=(i+1)/state.pairs.length*100+"%";
+        $("#trainStatus").textContent=`Training ${i+1}/${state.pairs.length}`;
+        await new Promise(requestAnimationFrame);
+      }
+      const avg=epochLoss/state.pairs.length;
+      state.losses.push(avg); drawLoss();
+      $("#loss").textContent=avg.toFixed(5);
+      $("#progress").style.width=(epoch/epochs*100)+"%";
+    }
+    m.version++;
+    state.training=false;
+    $("#trainStatus").textContent="Complete";
+    $("#modelBadge").textContent="MODEL v"+m.version;
+    $("#version").textContent="v"+m.version;
+    saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
+  }catch(error){
+    console.error(error);
+    state.training=false;
+    $("#trainStatus").textContent="Error";
+    $("#lossHint").textContent=error.message;
+  }
+  render();
 };
+
 testBtn.onclick=async()=>{
-  try{await new TinyImageModel().init();$("#previewOutput").textContent="WebGPU ready";}catch(e){$("#previewOutput").textContent=e.message}
+  if(!state.pairs.length)return;
+  try{
+    const m=await ensureModel();
+    const p=state.pairs[0];
+    const [input,target]=await Promise.all([dataURLToImage(p.original),dataURLToImage(p.target)]);
+    const c=imageToCanvas(input,64), t=imageToCanvas(target,64), out=await m.predict(c);
+    $("#inputPreview").replaceChildren(c); $("#targetPreview").replaceChildren(t); $("#outputPreview").replaceChildren(out);
+  }catch(error){
+    $("#outputPreview").textContent=error.message;
+  }
 };
-render();
+
+(async()=>{
+  try{await ensureModel();}catch(error){$("#engineStatus").textContent="WebGPU unavailable"}
+  render();
+})();
