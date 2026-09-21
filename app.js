@@ -42,14 +42,13 @@ function drawLoss(){
 
 async function ensureModel(){
   if(!model){
-    model=new TinyImageModel();
+    model=new TinyImageModel({version:state.modelVersion ?? 0,weights:state.weights});
     await model.init();
     $("#engineStatus").textContent="WebGPU active";
     $("#version").textContent="v"+model.version;
-    document.querySelector(".model-info b:nth-of-type(1)");
     $("#modelBadge").textContent="MODEL v"+model.version;
-    $("#modelParams") && ($("#modelParams").textContent=model.parameterCount);
-    $("#modelSize") && ($("#modelSize").textContent=(model.parameterCount*4)+" B");
+    $("#modelParams").textContent=model.parameterCount;
+    $("#modelSize").textContent=(model.parameterCount*4)+" B";
   }
   return model;
 }
