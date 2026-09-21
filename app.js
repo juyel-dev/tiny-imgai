@@ -160,7 +160,7 @@ async function readCachedBatch(batchPairs){
 trainBtn.onclick=async()=>{
   if(state.training||!state.pairs.length)return;
   state.training=true;state.losses=[];render();
-  $("#trainStatus").textContent="Starting";
+  $("#trainStatus").textContent="Starting CNN";
   $("#lossHint").textContent="real WebGPU loss";
   try{
     const m=await ensureModel();
