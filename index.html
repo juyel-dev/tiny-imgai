@@ -20,12 +20,26 @@
         <div class="metric"><b id="pairCount">0</b><span>pairs</span></div>
       </div>
 
-      <div class="dropzone" id="dropzone">
-        <div class="drop-icon">+</div>
-        <strong>Add image pair</strong>
-        <span>Original + optimized target</span>
-        <button id="addPair">Choose images</button>
-        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      <div class="pdf-inputs">
+        <div class="pdf-dropzone" id="originalDropzone">
+          <div class="pdf-icon">PDF</div>
+          <strong>Original PDF</strong>
+          <span id="originalHint">Drop the original notes PDF</span>
+          <button id="originalChoose">Choose original</button>
+          <input id="originalInput" type="file" accept="application/pdf,.pdf" hidden>
+        </div>
+        <div class="pdf-dropzone" id="processedDropzone">
+          <div class="pdf-icon">PDF</div>
+          <strong>Processed PDF</strong>
+          <span id="processedHint">Drop the optimized / processed PDF</span>
+          <button id="processedChoose">Choose processed</button>
+          <input id="processedInput" type="file" accept="application/pdf,.pdf" hidden>
+        </div>
+      </div>
+      <div class="pdf-summary" id="pdfSummary">
+        <div><span>Original</span><b id="originalFile">—</b><small id="originalPages">0 pages</small></div>
+        <div><span>Processed</span><b id="processedFile">—</b><small id="processedPages">0 pages</small></div>
+        <button class="primary" id="pairPdfBtn" disabled>Create page pairs</button>
       </div>
 
       <div class="dataset-list" id="datasetList">
