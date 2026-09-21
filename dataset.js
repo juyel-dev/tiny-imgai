@@ -13,37 +13,43 @@ export function openDataset(){
       if(!db.objectStoreNames.contains(DOCS))db.createObjectStore(DOCS,{keyPath:"uuid"});
       if(!db.objectStoreNames.contains(META))db.createObjectStore(META,{keyPath:"key"});
     };
-    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
   });
 }
 
 export async function addPdfDataset({originalFile,processedFile,originalPages,processedPages}){
-  if(originalPages!==processedPages)throw new Error("The PDFs have different page counts. Page pairing needs matching page counts.");
+  if(originalPages!==processedPages)throw new Error("The PDFs have different page counts. Pairing requires matching page counts.");
+  const existing=await listPairs();
+  const nextStart=existing.reduce((m,p)=>Math.max(m,Number(p.pageNumber)||0),0)+1;
   const db=await openDataset();
-  const originalDocId=crypto.randomUUID(),processedDocId=crypto.randomUUID();
-  const now=new Date().toISOString();
+  const originalDocId=crypto.randomUUID(),processedDocId=crypto.randomUUID(),now=new Date().toISOString();
   const pairs=[];
-  const tx=db.transaction([PAIRS,DOCS,META],"readwrite");
-  const meta=tx.objectStore(META),pairsStore=tx.objectStore(PAIRS),docs=tx.objectStore(DOCS);
-  const counter=await requestValue(meta,"pairCounter");
-  let next=Math.max(Number(counter?.value)||0,await maxPairNumber(pairsStore))+1;
-  docs.put({uuid:originalDocId,role:"original",name:originalFile.name,blob:originalFile,pageCount:originalPages,createdAt:now});
-  docs.put({uuid:processedDocId,role:"processed",name:processedFile.name,blob:processedFile,pageCount:processedPages,createdAt:now});
-  for(let page=1;page<=originalPages;page++){
-    const pair={uuid:crypto.randomUUID(),pageNumber:next++,originalDocId,processedDocId,originalPage:page,processedPage:page,createdAt:now};
-    pairsStore.put(pair);pairs.push(pair);
-  }
-  meta.put({key:"pairCounter",value:next-1});
-  return new Promise((resolve,reject)=>{tx.oncomplete=()=>resolve({originalDocId,processedDocId,pairs});tx.onerror=()=>reject(tx.error)});
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction([PAIRS,DOCS,META],"readwrite");
+    const pairsStore=tx.objectStore(PAIRS),docs=tx.objectStore(DOCS),meta=tx.objectStore(META);
+    docs.put({uuid:originalDocId,role:"original",name:originalFile.name,blob:originalFile,pageCount:originalPages,createdAt:now});
+    docs.put({uuid:processedDocId,role:"processed",name:processedFile.name,blob:processedFile,pageCount:processedPages,createdAt:now});
+    for(let page=1;page<=originalPages;page++){
+      pairs.push({uuid:crypto.randomUUID(),pageNumber:nextStart+page-1,originalDocId,processedDocId,originalPage:page,processedPage:page,createdAt:now});
+      pairsStore.put(pairs[pairs.length-1]);
+    }
+    meta.put({key:"pairCounter",value:nextStart+originalPages-1});
+    tx.oncomplete=()=>resolve({originalDocId,processedDocId,pairs});
+    tx.onerror=()=>reject(tx.error);
+    tx.onabort=()=>reject(tx.error||new Error("Could not save PDF dataset."));
+  });
 }
-
-function requestValue(store,key){return new Promise((resolve,reject)=>{const r=store.get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-function maxPairNumber(store){return new Promise((resolve,reject)=>{const r=store.getAll();r.onsuccess=()=>resolve(r.result.reduce((m,p)=>Math.max(m,Number(p.pageNumber)||0),0));r.onerror=()=>reject(r.error)})}
 
 export async function getDocument(uuid){
   const db=await openDataset();
-  return new Promise((resolve,reject)=>{const r=db.transaction(DOCS).objectStore(DOCS).get(uuid);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+  return new Promise((resolve,reject)=>{
+    const req=db.transaction(DOCS).objectStore(DOCS).get(uuid);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
 }
+
 export async function listPairs(){
   const db=await openDataset();
   return new Promise((resolve,reject)=>{
