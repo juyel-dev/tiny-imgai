@@ -1,7 +1,7 @@
 import { addPdfDataset, getCachedPage, cachePage, getDocument, listPairs } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
 import { TinyImageModel, imageToCanvas, canvasToRGB8 } from "./model.js";
-import { openPdf, pdfPageCount, renderPdfPage } from "./pdf.js";
+import { openPdf, pdfPageCount, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state={pairs:await listPairs(),training:false,losses:[],...loadState()};
 const $=s=>document.querySelector(s);
@@ -145,7 +145,7 @@ async function cacheTrainingDataset(groups){
       $("#progress").style.width=(ready/allPairs.length*100)+"%";
       await new Promise(requestAnimationFrame);
     }
-    await opdf.destroy();await ppdf.destroy();
+    await disposePdf(opdf);await disposePdf(ppdf);
   }
   return {total:allPairs.length,created};
 }
@@ -222,7 +222,7 @@ testBtn.onclick=async()=>{
     $("#inputPreview").replaceChildren(input);
     $("#targetPreview").replaceChildren(target);
     $("#outputPreview").replaceChildren(output);
-    await opdf.destroy();await ppdf.destroy();
+    await disposePdf(opdf);await disposePdf(ppdf);
   }catch(error){$("#outputPreview").textContent=error.message}
 };
 
