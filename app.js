@@ -61,15 +61,17 @@ trainBtn.onclick=async()=>{
   try{
     const m=await ensureModel();
     const epochs=20;
+    $("#trainStatus").textContent="Preparing dataset";
+    const prepared=await Promise.all(state.pairs.map(async p=>{
+      const [input,target]=await Promise.all([dataURLToImage(p.original),dataURLToImage(p.target)]);
+      return {a:imageToCanvas(input,64),b:imageToCanvas(target,64)};
+    }));
     for(let epoch=1;epoch<=epochs;epoch++){
       let epochLoss=0;
-      for(let i=0;i<state.pairs.length;i++){
-        const p=state.pairs[i];
-        const input=await dataURLToImage(p.original);
-        const target=await dataURLToImage(p.target);
-        const a=imageToCanvas(input,64), b=imageToCanvas(target,64);
+      for(let i=0;i<prepared.length;i++){
+        const {a,b}=prepared[i];
         const result=await m.trainPair(a,b);
-        m.applyGradient(result.grad,0.8);
+        m.applyGradient(result.grad);
         epochLoss+=result.loss;
         $("#step").textContent=((epoch-1)*state.pairs.length+i+1);
         $("#epoch").textContent=`${epoch} / ${epochs}`;
