@@ -18,7 +18,7 @@ struct Params { pixels: u32, width: u32, height: u32 };
 @group(0) @binding(3) var<storage, read_write> acc: array<atomic<i32>>;
 @group(0) @binding(4) var<uniform> p: Params;
 
-const HIDDEN:u32 = 8u;
+const HIDDEN:u32 = 4u;
 const OUT:u32 = 3u;
 const K:u32 = 3u;
 const PAD:i32 = 1;
@@ -27,8 +27,8 @@ const SCALE:f32 = 1000.0;
 fn relu(v:f32)->f32 { return max(v,0.0); }
 fn sigmoid(v:f32)->f32 { return 1.0/(1.0+exp(-v)); }
 
-fn l1Index(h:u32,c:u32,k:u32){ return h*28u+c*9u+k; }
-fn l2Index(o:u32,h:u32,k:u32){ return 224u+o*73u+h*9u+k; }
+fn l1Index(h:u32,c:u32,k:u32)->u32{ return h*28u+c*9u+k; }
+fn l2Index(o:u32,h:u32,k:u32)->u32{ return 112u+o*37u+h*9u+k; }
 
 fn inputAt(base:u32, px:i32, py:i32, c:u32)->f32 {
   if(px<0 || py<0 || px>=i32(p.width) || py>=i32(p.height)){ return 0.0; }
@@ -59,12 +59,12 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
   let base=sample*p.width*p.height*3u;
   let targetBase=base;
 
-  var hidden:array<f32,8>;
-  for(var h:u32=0u;h<8u;h++){ hidden[h]=hiddenAt(base,px,py,h); }
+  var hidden:array<f32,4>;
+  for(var h:u32=0u;h<4u;h++){ hidden[h]=hiddenAt(base,px,py,h); }
 
   for(var o:u32=0u;o<3u;o++){
-    var z=w[224u+o*73u+72u];
-    for(var h:u32=0u;h<8u;h++){
+    var z=w[112u+o*37u+72u];
+    for(var h:u32=0u;h<4u;h++){
       for(var ky:u32=0u;ky<3u;ky++){
         for(var kx:u32=0u;kx<3u;kx++){
           let ox=px+i32(kx)-PAD;
@@ -81,7 +81,7 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
     let dy=2.0*e*y*(1.0-y);
     atomicAdd(&acc[PARAMS],i32(e*e*SCALE));
 
-    for(var h:u32=0u;h<8u;h++){
+    for(var h:u32=0u;h<4u;h++){
       for(var ky:u32=0u;ky<3u;ky++){
         for(var kx:u32=0u;kx<3u;kx++){
           let hx=px+i32(kx)-PAD;
@@ -93,10 +93,10 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
         }
       }
     }
-    atomicAdd(&acc[224u+o*73u+72u],i32(dy*SCALE));
+    atomicAdd(&acc[112u+o*37u+72u],i32(dy*SCALE));
   }
 
-  for(var h:u32=0u;h<8u;h++){
+  for(var h:u32=0u;h<4u;h++){
     var pre=0.0;
     for(var c:u32=0u;c<3u;c++){
       for(var ky:u32=0u;ky<3u;ky++){
@@ -114,8 +114,8 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
           let ox=px-i32(kx)+PAD;
           let oy=py-i32(ky)+PAD;
           if(ox>=0 && oy>=0 && ox<i32(p.width) && oy<i32(p.height)){
-            var z=w[224u+o*73u+72u];
-            for(var hh:u32=0u;hh<8u;hh++){
+            var z=w[112u+o*37u+72u];
+            for(var hh:u32=0u;hh<4u;hh++){
               for(var qy:u32=0u;qy<3u;qy++){
                 for(var qx:u32=0u;qx<3u;qx++){
                   z += w[l2Index(o,hh,qy*3u+qx)]*hiddenAt(base,ox+i32(qx)-PAD,oy+i32(qy)-PAD,hh);
@@ -152,8 +152,8 @@ struct Params { pixels:u32, width:u32, height:u32 };
 
 fn relu(v:f32)->f32{return max(v,0.0);}
 fn sigmoid(v:f32)->f32{return 1.0/(1.0+exp(-v));}
-fn l1Index(h:u32,c:u32,k:u32){return h*28u+c*9u+k;}
-fn l2Index(o:u32,h:u32,k:u32){return 224u+o*73u+h*9u+k;}
+fn l1Index(h:u32,c:u32,k:u32)->u32{return h*28u+c*9u+k;}
+fn l2Index(o:u32,h:u32,k:u32)->u32{return 112u+o*37u+h*9u+k;}
 fn inputAt(base:u32,px:i32,py:i32,c:u32)->f32{if(px<0||py<0||px>=i32(p.width)||py>=i32(p.height)){return 0.0;}return x[base+(u32(py)*p.width+u32(px))*3u+c];}
 fn hiddenAt(base:u32,px:i32,py:i32,h:u32)->f32{
   var sum=w[l1Index(h,0u,0u)+27u];
@@ -166,8 +166,8 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
   let local=i%(p.width*p.height);let sample=i/(p.width*p.height);
   let px=i32(local%p.width),py=i32(local/p.width),base=sample*p.width*p.height*3u;
   for(var o:u32=0u;o<3u;o++){
-    var z=w[224u+o*73u+72u];
-    for(var h:u32=0u;h<8u;h++){for(var ky:u32=0u;ky<3u;ky++){for(var kx:u32=0u;kx<3u;kx++){
+    var z=w[112u+o*37u+72u];
+    for(var h:u32=0u;h<4u;h++){for(var ky:u32=0u;ky<3u;ky++){for(var kx:u32=0u;kx<3u;kx++){
       let hx=px+i32(kx)-1,hy=py+i32(ky)-1;
       if(hx>=0&&hy>=0&&hx<i32(p.width)&&hy<i32(p.height)){z+=w[l2Index(o,h,ky*3u+kx)]*hiddenAt(base,hx,hy,h);}
     }}}
@@ -206,11 +206,11 @@ export class TinyImageModel{
     this.m=new Float32Array(PARAMS);this.v=new Float32Array(PARAMS);this.optimizerStep=0;
     if(!valid)this.initWeights();
     this.parameterCount=PARAMS;this.modelBytes=PARAMS*4;
-    this.architecture="3×3 Conv 3→8 + ReLU + 3×3 Conv 8→3";
+    this.architecture="3×3 Conv 3→4 + ReLU + 3×3 Conv 4→3";
   }
   initWeights(){
-    for(let i=0;i<224;i++)this.weights[i]=(Math.random()-0.5)*0.06;
-    for(let i=224;i<PARAMS;i++)this.weights[i]=(Math.random()-0.5)*0.06;
+    for(let i=0;i<L1;i++)this.weights[i]=(Math.random()-0.5)*0.06;
+    for(let i=L1;i<PARAMS;i++)this.weights[i]=(Math.random()-0.5)*0.06;
   }
   async init(){
     if(!navigator.gpu)throw new Error("WebGPU is not available in this browser.");
@@ -285,4 +285,4 @@ export class TinyImageModel{
     return c;
   }
 }
-export const MODEL_INFO={parameterCount:PARAMS,modelBytes:PARAMS*4,architecture:"3×3 Conv 3→8 + ReLU + 3×3 Conv 8→3"};
+export const MODEL_INFO={parameterCount:PARAMS,modelBytes:PARAMS*4,architecture:"3×3 Conv 3→4 + ReLU + 3×3 Conv 4→3"};
