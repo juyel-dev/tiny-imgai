@@ -46,12 +46,12 @@ export function buildModel(tf, inputSize = INPUT_SIZE) {
   const d3 = convBlock(tf, c3, 64, "dec3");
 
   const u2 = tf.layers.upSampling2d({ size: [2, 2], name: "up2" }).apply(d3);
-  const c2 = tf.layers.concatenate({ name: "concat2" }).apply([u2, e2]);
-  const d2 = convBlock(tf, c2, 32, "dec2");
+  const cat2 = tf.layers.concatenate({ name: "concat2" }).apply([u2, e2]);
+  const d2 = convBlock(tf, cat2, c2, "dec2");
 
   const u1 = tf.layers.upSampling2d({ size: [2, 2], name: "up1" }).apply(d2);
-  const c1 = tf.layers.concatenate({ name: "concat1" }).apply([u1, e1]);
-  const d1 = convBlock(tf, c1, 16, "dec1");
+  const cat1 = tf.layers.concatenate({ name: "concat1" }).apply([u1, e1]);
+  const d1 = convBlock(tf, cat1, c1, "dec1");
 
   const output = tf.layers.conv2d({ filters: 3, kernelSize: 1, activation: "sigmoid", name: "output" }).apply(d1);
 
