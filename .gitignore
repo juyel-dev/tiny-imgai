@@ -6,3 +6,6 @@ train/.venv/
 train/data/cache256/
 train/data/manifest.json
 train/benchmarks/
+
+train/checkpoints/
+train/evaluation/
