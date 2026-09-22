@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from losses import PrintCleanLoss
+
 
 INPUT_SIZE = 256
 DEFAULT_EPOCHS = 1000
@@ -28,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="tiny-imgai local Python trainer")
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent / "data"))
     parser.add_argument("--checkpoint-dir", default=str(Path(__file__).resolve().parent / "checkpoints" / "python-model"))
+    parser.add_argument("--loss-profile", choices=("mse", "print-clean-v1"), default=os.getenv("LOSS_PROFILE", "mse"))
     parser.add_argument("--epochs", type=int, default=int(os.getenv("EPOCHS", DEFAULT_EPOCHS)))
     parser.add_argument("--batch-size", type=int, default=int(os.getenv("BATCH_SIZE", DEFAULT_BATCH_SIZE)))
     parser.add_argument("--learning-rate", type=float, default=float(os.getenv("LEARNING_RATE", DEFAULT_LEARNING_RATE)))
@@ -329,6 +332,7 @@ def load_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     expected_signature: str,
+    expected_loss_profile: str,
 ) -> tuple[int, int, int, float]:
     if not checkpoint_path.exists():
         return 0, 0, 0, float("nan")
@@ -336,6 +340,10 @@ def load_checkpoint(
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if checkpoint.get("dataset_signature") != expected_signature:
         print("Existing checkpoint belongs to a different dataset/input size; starting fresh.")
+        return 0, 0, 0, float("nan")
+
+    if checkpoint.get("loss_profile", "mse") != expected_loss_profile:
+        print("Existing checkpoint uses a different loss profile; starting fresh.")
         return 0, 0, 0, float("nan")
 
     model.load_state_dict(checkpoint["model"])
@@ -362,6 +370,7 @@ def save_checkpoint(
     global_step: int,
     last_loss: float,
     signature: str,
+    loss_profile: str,
 ) -> None:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = checkpoint_path.with_suffix(".tmp")
@@ -372,6 +381,7 @@ def save_checkpoint(
             "global_step": global_step,
             "last_loss": last_loss,
             "dataset_signature": signature,
+            "loss_profile": loss_profile,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
         },
@@ -421,6 +431,7 @@ def main() -> int:
     print(f"Threads: {torch.get_num_threads()}")
     print(f"Input: {args.input_size}x{args.input_size}")
     print(f"Batch: {args.batch_size}")
+    print(f"Loss profile: {args.loss_profile}")
     print(f"Epoch target: {args.epochs}")
     print(f"Max pages: {'all' if args.max_pages == 0 else args.max_pages}")
     print()
@@ -445,7 +456,7 @@ def main() -> int:
         betas=(0.9, 0.999),
         eps=1e-7,
     )
-    criterion = nn.MSELoss()
+    criterion = PrintCleanLoss() if args.loss_profile == "print-clean-v1" else nn.MSELoss()
 
     total_state_params = sum(t.numel() for t in model.state_dict().values())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -486,6 +497,7 @@ def main() -> int:
                     global_step,
                     last_loss,
                     signature,
+                    args.loss_profile,
                 )
                 print("Time budget reached. Checkpoint saved; run again to resume.")
                 return 0
@@ -542,6 +554,7 @@ def main() -> int:
                     global_step,
                     last_loss,
                     signature,
+                    args.loss_profile,
                 )
                 print(f"  checkpoint saved at page {page_index}")
 
@@ -565,6 +578,7 @@ def main() -> int:
             global_step,
             last_loss,
             signature,
+            args.loss_profile,
         )
         print(f"checkpoint saved: {checkpoint_path}")
 
