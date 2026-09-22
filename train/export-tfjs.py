@@ -96,7 +96,7 @@ def main() -> int:
 
     expected_state_values = sum(value.numel() for value in state.values())
     exported_values = sum(int(np.prod(array.shape)) for _, array in tensors)
-    non-exported_buffers = expected_state_values - exported_values
+    non_exported_buffers = expected_state_values - exported_values
 
     if non_exported_buffers != 14:
         raise ValueError(
