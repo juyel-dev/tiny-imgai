@@ -7,6 +7,17 @@
   <title>tiny-imgai — Training Lab</title>
   <link rel="stylesheet" href="/web/style.css">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script>
+    // Keep WebGL's reusable texture pool bounded before the backend initializes.
+    // This does not change the model or 256×256 input resolution.
+    if (window.tf) {
+      try {
+        window.tf.env().set("WEBGL_DELETE_TEXTURE_THRESHOLD", 256 * 1024 * 1024);
+      } catch (error) {
+        console.warn("[tiny-imgai] WebGL texture threshold setup failed", error);
+      }
+    }
+  </script>
 </head>
 <body>
   <header class="topbar">

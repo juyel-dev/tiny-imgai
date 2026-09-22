@@ -316,7 +316,7 @@ trainBtn.onclick = async () => {
     const epochs = 20;
     // Keep the full 256×256 experiment. Batch 2 is the first speed step;
     // trainOnBatch() now gives us deterministic one-update-per-batch cleanup.
-    const batchSize = 2;
+    const batchSize = 1;
     const totalBatches = [...groups.values()]
       .reduce((n, g) => n + Math.ceil(g.length / batchSize), 0);
 
