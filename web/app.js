@@ -1,7 +1,7 @@
-import { addPdfDataset, listPairs } from "./dataset.js";
+import { addPdfDataset, listPairs, getDocument, getCachedPage, cachePage } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, INPUT_SIZE } from "./model.js";
-import { pdfPageCount } from "./pdf.js";
+import { TinyImageModel, INPUT_SIZE, canvasToRGB8 } from "./model.js";
+import { pdfPageCount, openPdf, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state = { pairs: await listPairs(), training: false, losses: [], ...loadState() };
 const $ = (s) => document.querySelector(s);
@@ -225,6 +225,94 @@ function finishTrainingWorker() {
   trainingWorker = null;
 }
 
+function yieldToBrowser() {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => resolve(), { timeout: 16 });
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+function groupedPairs(pairs) {
+  const groups = new Map();
+  for (const p of pairs) {
+    if (!p.originalDocId || !p.processedDocId) continue;
+    const key = p.originalDocId + "|" + p.processedDocId;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  return groups;
+}
+
+async function prepareTrainingCache(pairs) {
+  const groups = groupedPairs(pairs);
+  if (!groups.size) throw new Error("No PDF-backed training pairs found.");
+
+  const allPairs = [...groups.values()].flat();
+  let created = 0;
+  let prepared = 0;
+
+  setTrainingStatus("Preparing pages for background training");
+  $("#lossHint").textContent = "PDF rendering is kept separate from TensorFlow training";
+
+  for (const group of groups.values()) {
+    const first = group[0];
+    const [od, pd] = await Promise.all([
+      getDocument(first.originalDocId),
+      getDocument(first.processedDocId),
+    ]);
+
+    const [opdf, ppdf] = await Promise.all([
+      openPdf(od.blob),
+      openPdf(pd.blob),
+    ]);
+
+    try {
+      for (const pair of group) {
+        const cached = await getCachedPage(pair.uuid);
+
+        if (!(cached?.size === INPUT_SIZE && cached.original && cached.target)) {
+          const originalCanvas = await renderPdfPage(opdf, pair.originalPage, INPUT_SIZE);
+          const original = canvasToRGB8(originalCanvas);
+          releaseCanvas(originalCanvas);
+
+          await yieldToBrowser();
+
+          const targetCanvas = await renderPdfPage(ppdf, pair.processedPage, INPUT_SIZE);
+          const target = canvasToRGB8(targetCanvas);
+          releaseCanvas(targetCanvas);
+
+          await cachePage(pair.uuid, {
+            size: INPUT_SIZE,
+            original,
+            target,
+          });
+          created++;
+        }
+
+        prepared++;
+        if (prepared === 1 || prepared % 5 === 0 || prepared === allPairs.length) {
+          const percent = Math.min(35, (prepared / allPairs.length) * 35);
+          $("#progress").style.width = percent + "%";
+          setTrainingStatus("Preparing page " + prepared + "/" + allPairs.length);
+        }
+
+        await yieldToBrowser();
+      }
+    } finally {
+      await Promise.allSettled([
+        disposePdf(opdf),
+        disposePdf(ppdf),
+      ]);
+    }
+  }
+
+  return { total: allPairs.length, created };
+}
+
+
 trainBtn.onclick = () => {
   if (state.training || !state.pairs.length) return;
 
@@ -237,9 +325,18 @@ trainBtn.onclick = () => {
   $("#lossHint").textContent = "PDF preparation + training are running outside the UI thread";
   $("#progress").style.width = "0%";
 
-  trainingWorker = new Worker(new URL("./train-worker.js", import.meta.url), { type: "module" });
+  setTrainingStatus("Preparing training cache");
+  prepareTrainingCache(state.pairs).then(({ total, created }) => {
+    setTrainingStatus("Starting background trainer");
+    $("#lossHint").textContent =
+      created
+        ? "Cached " + created + " new pages; TensorFlow training is now in a worker"
+        : "Using existing 256×256 page cache; TensorFlow training is now in a worker";
+    $("#progress").style.width = "0%";
 
-  trainingWorker.onmessage = (event) => {
+    trainingWorker = new Worker(new URL("./train-worker.js", import.meta.url), { type: "module" });
+
+    trainingWorker.onmessage = (event) => {
     const msg = event.data || {};
 
     if (msg.type === "ready") {
@@ -338,9 +435,17 @@ trainBtn.onclick = () => {
     updatePairButton();
   };
 
-  trainingWorker.postMessage({
-    type: "start",
-    pairs: state.pairs,
+    trainingWorker.postMessage({
+      type: "start",
+      pairs: state.pairs,
+    });
+  }).catch((error) => {
+    console.error("[tiny-imgai prepare error]", error);
+    state.training = false;
+    setTrainingStatus("Training stopped");
+    $("#lossHint").textContent = error?.message || String(error);
+    render();
+    updatePairButton();
   });
 };
 
