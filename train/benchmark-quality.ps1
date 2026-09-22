@@ -1,6 +1,6 @@
 param(
-  [int]$TrainPages = 16,
-  [int]$ValPages = 8,
+  [int]$TrainPages = 64,
+  [int]$ValPages = 16,
   [int]$Epochs = 1,
   [int]$Threads = 6,
   [int]$MinFreeRamMiB = 768,
