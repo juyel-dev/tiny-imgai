@@ -7,6 +7,12 @@
 export const INPUT_SIZE = 256;
 export const DEFAULT_CHANNELS = [16, 32, 64, 128];
 
+// Validated production image-cleaning configuration.
+// Keep the legacy defaults above stable for old/imported 256px models until
+// the trained production checkpoint is exported and deployed.
+export const PRODUCTION_INPUT_SIZE = 512;
+export const PRODUCTION_CHANNELS = [48, 96, 192, 384];
+
 function resolveChannels(channels) {
   if (!Array.isArray(channels) || channels.length !== 4) {
     throw new Error("channels must be [c1, c2, c3, bottleneck]");
