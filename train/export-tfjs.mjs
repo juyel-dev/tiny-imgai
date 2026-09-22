@@ -103,6 +103,69 @@ async function main() {
 
     model.setWeights(tensors);
 
+    const probeMeta = metadata.probe;
+    if (!probeMeta?.input_file || !probeMeta?.output_file) {
+      throw new Error("Export staging is missing the deterministic parity probe.");
+    }
+
+    const probeInputBytes = fs.readFileSync(
+      path.join(stagingDir, probeMeta.input_file)
+    );
+    const probeOutputBytes = fs.readFileSync(
+      path.join(stagingDir, probeMeta.output_file)
+    );
+
+    const toFloat32 = (bytes) => {
+      const arrayBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      );
+      return new Float32Array(arrayBuffer);
+    };
+
+    const probeInput = toFloat32(probeInputBytes);
+    const expectedProbeOutput = toFloat32(probeOutputBytes);
+    const inputShape = probeMeta.shape || [1, 512, 512, 3];
+
+    if (
+      probeInput.length !== inputShape.reduce((a, b) => a * b, 1) ||
+      expectedProbeOutput.length !== inputShape.reduce((a, b) => a * b, 1)
+    ) {
+      throw new Error("Invalid parity probe buffer length.");
+    }
+
+    const probeInputTensor = tf.tensor(probeInput, inputShape, "float32");
+    const probeOutputTensor = model.predict(probeInputTensor);
+    const actualProbeOutput = await probeOutputTensor.data();
+
+    let maxAbsDiff = 0;
+    let sumAbsDiff = 0;
+    for (let i = 0; i < actualProbeOutput.length; i++) {
+      const diff = Math.abs(actualProbeOutput[i] - expectedProbeOutput[i]);
+      maxAbsDiff = Math.max(maxAbsDiff, diff);
+      sumAbsDiff += diff;
+    }
+    const meanAbsDiff = sumAbsDiff / actualProbeOutput.length;
+
+    probeOutputTensor.dispose();
+    probeInputTensor.dispose();
+
+    if (maxAbsDiff > 1e-4 || meanAbsDiff > 1e-6) {
+      throw new Error(
+        "PyTorch/tf.js parity check failed: maxAbsDiff=" +
+        maxAbsDiff.toExponential(6) +
+        ", meanAbsDiff=" +
+        meanAbsDiff.toExponential(6)
+      );
+    }
+
+    console.log(
+      "Parity check: PASS · maxAbsDiff=" +
+      maxAbsDiff.toExponential(6) +
+      " · meanAbsDiff=" +
+      meanAbsDiff.toExponential(6)
+    );
+
     const probe = tf.zeros([1, 512, 512, 3]);
     const output = model.predict(probe);
     if (Array.isArray(output) || output.shape.join(",") !== "1,512,512,3") {
