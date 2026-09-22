@@ -2,28 +2,42 @@ import { buildModel, INPUT_SIZE } from "../core/model.js";
 
 export { INPUT_SIZE };
 
-// Raw RGB bytes (no alpha) — same shape the IndexedDB page cache already
-// stores, so cached pages can go straight to a tensor with no canvas
-// round-trip.
+// Raw RGB bytes (no alpha) — same shape the IndexedDB page cache stores.
 export function canvasToRGB8(canvas) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const out = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4) {
-    out[j++] = data[i]; out[j++] = data[i + 1]; out[j++] = data[i + 2];
+    out[j++] = data[i];
+    out[j++] = data[i + 1];
+    out[j++] = data[i + 2];
   }
   return out;
 }
 
 export function imageToCanvas(source, size = INPUT_SIZE) {
   const c = document.createElement("canvas");
-  c.width = size; c.height = size;
+  c.width = size;
+  c.height = size;
   c.getContext("2d", { willReadFrequently: true }).drawImage(source, 0, 0, size, size);
   return c;
 }
 
-function rgb8ToTensor(bytes, size) {
-  return window.tf.tidy(() => window.tf.tensor3d(bytes, [size, size, 3], "float32").div(255));
+function batchBytesToTensor(bytesArray, size) {
+  const count = bytesArray.length;
+  const pixels = size * size * 3;
+  const packed = new Float32Array(count * pixels);
+
+  for (let b = 0; b < count; b++) {
+    const src = bytesArray[b];
+    if (!src || src.length !== pixels) {
+      throw new Error(`Invalid RGB page tensor: expected ${pixels} bytes, got ${src?.length ?? "none"}.`);
+    }
+    const offset = b * pixels;
+    for (let i = 0; i < pixels; i++) packed[offset + i] = src[i] / 255;
+  }
+
+  return window.tf.tensor4d(packed, [count, size, size, 3], "float32");
 }
 
 const OPTIMIZER_LR = 1e-3;
@@ -34,64 +48,116 @@ export class TinyImageModel {
     this.model = null;
   }
 
-  get parameterCount() { return this.model ? this.model.countParams() : 0; }
-  get architecture() { return "U-Net (enc 16\u219232\u219264 \u2192 bottleneck 128 \u2192 dec 64\u219232\u219216), tf.js"; }
+  get parameterCount() {
+    return this.model ? this.model.countParams() : 0;
+  }
+
+  get architecture() {
+    return "U-Net (enc 16→32→64 → bottleneck 128 → dec 64→32→16), tf.js";
+  }
 
   compile() {
-    this.model.compile({ optimizer: window.tf.train.adam(OPTIMIZER_LR), loss: "meanSquaredError" });
+    if (!this.model) throw new Error("Model is not initialized.");
+    this.model.compile({
+      optimizer: window.tf.train.adam(OPTIMIZER_LR),
+      loss: "meanSquaredError",
+    });
+  }
+
+  dispose() {
+    if (!this.model) return;
+    const optimizer = this.model.optimizer;
+    try {
+      this.model.dispose();
+    } finally {
+      if (optimizer && typeof optimizer.dispose === "function") optimizer.dispose();
+      this.model = null;
+    }
   }
 
   async init() {
     const tf = window.tf;
     if (!tf) throw new Error("tf.js did not load (check network / CDN block)");
+    this.dispose();
     this.model = buildModel(tf, INPUT_SIZE);
     this.compile();
   }
 
-  // Best-effort resume of whatever was last saved in this browser.
-  // Throws if nothing has been saved yet — caller falls back to init().
   async loadFromBrowserStorage() {
-    this.model = await window.tf.loadLayersModel("indexeddb://tiny-imgai-model");
+    const tf = window.tf;
+    if (!tf) throw new Error("tf.js did not load (check network / CDN block)");
+    const nextModel = await tf.loadLayersModel("indexeddb://tiny-imgai-model");
+    this.dispose();
+    this.model = nextModel;
     this.compile();
   }
 
   async saveToBrowserStorage() {
+    if (!this.model) throw new Error("Model is not initialized.");
     await this.model.save("indexeddb://tiny-imgai-model");
   }
 
   async trainBatch(inputBytesArray, targetBytesArray, size = INPUT_SIZE) {
+    if (!this.model) throw new Error("Model is not initialized.");
+    if (inputBytesArray.length !== targetBytesArray.length || !inputBytesArray.length) {
+      throw new Error("Input/target batch mismatch.");
+    }
+
     const tf = window.tf;
-    const x = tf.stack(inputBytesArray.map((b) => rgb8ToTensor(b, size)));
-    const y = tf.stack(targetBytesArray.map((b) => rgb8ToTensor(b, size)));
-    const history = await this.model.fit(x, y, { epochs: 1, batchSize: inputBytesArray.length, verbose: 0 });
-    tf.dispose([x, y]);
-    return history.history.loss[0];
+    let x = null;
+    let y = null;
+
+    try {
+      x = batchBytesToTensor(inputBytesArray, size);
+      y = batchBytesToTensor(targetBytesArray, size);
+      const history = await this.model.fit(x, y, {
+        epochs: 1,
+        batchSize: inputBytesArray.length,
+        verbose: 0,
+      });
+      return Number(history.history.loss[0]);
+    } finally {
+      tf.dispose([x, y]);
+    }
   }
 
   async predict(canvas) {
+    if (!this.model) throw new Error("Model is not initialized.");
     const tf = window.tf;
     const size = canvas.width;
-    const x = tf.tidy(() => tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0));
-    const y = this.model.predict(x);
-    const out = tf.tidy(() => y.squeeze([0]).clipByValue(0, 1));
-    const outCanvas = document.createElement("canvas");
-    outCanvas.width = size; outCanvas.height = size;
-    await tf.browser.toPixels(out, outCanvas);
-    tf.dispose([x, y, out]);
-    return outCanvas;
+    const x = tf.tidy(() =>
+      tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0)
+    );
+
+    let y = null;
+    let out = null;
+    try {
+      y = this.model.predict(x);
+      out = tf.tidy(() => y.squeeze([0]).clipByValue(0, 1));
+
+      const outCanvas = document.createElement("canvas");
+      outCanvas.width = size;
+      outCanvas.height = size;
+      await tf.browser.toPixels(out, outCanvas);
+      return outCanvas;
+    } finally {
+      tf.dispose([x, y, out]);
+    }
   }
 
-  // Downloads model.json + weights.bin — the exact same format
-  // train.js writes on the Node/GH Actions side, so a checkpoint trained
-  // there can be imported here, and vice versa.
   async exportWeights() {
+    if (!this.model) throw new Error("Model is not initialized.");
     await this.model.save(`downloads://tiny-imgai-model-v${this.version}`);
   }
 
-  // fileList must contain both the .json and its .bin file(s), selected
-  // together (the Import button's file input has `multiple`).
   async loadWeights(fileList) {
-    this.model = await window.tf.loadLayersModel(window.tf.io.browserFiles(Array.from(fileList)));
+    const tf = window.tf;
+    if (!fileList?.length) throw new Error("No model files selected.");
+    const nextModel = await tf.loadLayersModel(
+      tf.io.browserFiles(Array.from(fileList))
+    );
+    this.dispose();
+    this.model = nextModel;
     this.compile();
   }
 }
