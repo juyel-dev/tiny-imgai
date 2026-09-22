@@ -1,6 +1,12 @@
 import { addPdfDataset, listPairs, getDocument, getCachedPage, cachePage } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, INPUT_SIZE, PRODUCTION_INPUT_SIZE, canvasToRGB8 } from "./model.js";
+import {
+  INPUT_SIZE,
+  PRODUCTION_INPUT_SIZE,
+  PRODUCTION_MODEL_URL,
+  PRODUCTION_METADATA_URL,
+  canvasToRGB8,
+} from "./model.js";
 import { pdfPageCount, openPdf, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state = { pairs: await listPairs(), training: false, losses: [], ...loadState() };
@@ -11,7 +17,10 @@ const datasetList = $("#datasetList");
 const trainBtn = $("#trainBtn");
 const testBtn = $("#testBtn");
 
-let model = null;
+let inferenceWorker = null;
+let inferenceReady = null;
+let inferencePending = new Map();
+let inferenceRequestId = 0;
 let trainingWorker = null;
 let originalFile = null;
 let processedFile = null;
@@ -21,7 +30,7 @@ let processedPages = 0;
 function render() {
   pairCount.textContent = state.pairs.length;
   trainDataset.textContent = state.pairs.length + " pair" + (state.pairs.length === 1 ? "" : "s");
-  trainBtn.disabled = state.pairs.length === 0 || state.training;
+  trainBtn.disabled = true;
   testBtn.disabled = !testImageCanvas || state.training;
   datasetList.innerHTML = state.pairs.length
     ? state.pairs.slice(-8).reverse().map((p) =>
@@ -172,41 +181,106 @@ function releaseCanvas(canvas) {
 }
 
 
-async function ensureModel() {
-  if (!model) {
-    const tf = window.tf;
-    if (!tf) {
-      throw new Error("tf.js did not load (check network / ad-blocker / CDN access)");
-    }
-
-    const candidate = new TinyImageModel({
-      version: state.modelVersion ?? 3,
-      mode: "production",
-    });
-
-    try {
-      setTrainingStatus("Loading 512×512 production model…");
-      const metadata = await candidate.loadProductionModel();
-
-      model = candidate;
-      $("#engineStatus").textContent = "tf.js backend: " + tf.getBackend();
-      $("#modelRuntime").textContent = tf.getBackend() + " · production";
-      $("#version").textContent = "v" + model.version;
-      $("#modelBadge").textContent = "PRODUCTION v" + model.version;
-      $("#modelParams").textContent = model.parameterCount.toLocaleString();
-      $("#modelSize").textContent =
-        (model.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
-      $("#modelArch").textContent = model.architecture;
-      $("#trainStatus").textContent =
-        "Production model loaded · 512px inference ready";
-      return model;
-    } catch (error) {
-      candidate.dispose();
-      throw error;
-    }
+async function ensureInferenceWorker() {
+  if (inferenceWorker && inferenceReady) {
+    await inferenceReady;
+    return inferenceWorker;
   }
 
-  return model;
+  inferenceWorker = new Worker(
+    new URL("./inference-worker.js", import.meta.url),
+    { type: "module" }
+  );
+
+  inferenceReady = new Promise((resolve, reject) => {
+    const worker = inferenceWorker;
+
+    worker.onmessage = (event) => {
+      const msg = event.data || {};
+
+      if (msg.type === "ready") {
+        $("#engineStatus").textContent = "Production CPU worker ready";
+        $("#modelRuntime").textContent = msg.backend + " · worker";
+        $("#version").textContent = "v3";
+        $("#modelBadge").textContent = "PRODUCTION v3";
+        $("#modelParams").textContent = Number(msg.parameterCount).toLocaleString();
+        $("#modelSize").textContent =
+          (Number(msg.parameterCount) * 4 / 1048576).toFixed(2) + " MiB";
+        $("#modelArch").textContent = msg.architecture;
+        resolve(worker);
+        return;
+      }
+
+      if (msg.type === "result" || msg.type === "result-error") {
+        const pending = inferencePending.get(msg.id);
+        if (!pending) return;
+        inferencePending.delete(msg.id);
+
+        if (msg.type === "result-error") {
+          pending.reject(new Error(msg.message));
+        } else {
+          pending.resolve({
+            width: msg.width,
+            height: msg.height,
+            buffer: msg.buffer,
+          });
+        }
+        return;
+      }
+
+      if (msg.type === "error") {
+        reject(new Error(msg.message));
+        for (const pending of inferencePending.values()) {
+          pending.reject(new Error(msg.message));
+        }
+        inferencePending.clear();
+      }
+    };
+
+    worker.onerror = (event) => {
+      const message =
+        event?.message ||
+        "Inference worker crashed. Chrome's GPU path has been intentionally avoided.";
+      reject(new Error(message));
+      for (const pending of inferencePending.values()) {
+        pending.reject(new Error(message));
+      }
+      inferencePending.clear();
+    };
+  });
+
+  try {
+    await inferenceReady;
+    inferenceWorker.postMessage({
+      type: "init",
+      modelUrl: PRODUCTION_MODEL_URL,
+      metadataUrl: PRODUCTION_METADATA_URL,
+    });
+    return inferenceWorker;
+  } catch (error) {
+    inferenceWorker?.terminate();
+    inferenceWorker = null;
+    inferenceReady = null;
+    throw error;
+  }
+}
+
+async function runProductionInference(canvas) {
+  const worker = await ensureInferenceWorker();
+  const rgb = canvasToRGB8(canvas);
+  const id = ++inferenceRequestId;
+
+  return new Promise((resolve, reject) => {
+    inferencePending.set(id, { resolve, reject });
+    worker.postMessage(
+      {
+        type: "infer",
+        id,
+        buffer: rgb.buffer,
+      },
+      [rgb.buffer]
+    );
+  });
 }
 
 function setTrainingStatus(text) {
@@ -341,8 +415,8 @@ trainBtn.onclick = () => {
     setTrainingStatus("Starting background trainer");
     $("#lossHint").textContent =
       created
-        ? "Cached " + created + " new pages; TensorFlow training is now in a worker"
-        : "Using existing 256×256 page cache; TensorFlow training is now in a worker";
+        ? "Cached " + created + " new pages; browser training is disabled for stability."
+        : "Browser training is disabled. Use the validated local PyTorch trainer.";
     $("#progress").style.width = "0%";
 
     trainingWorker = new Worker(new URL("./train-worker.js", import.meta.url), { type: "module" });
@@ -538,33 +612,30 @@ testBtn.onclick = async () => {
   if (!testImageCanvas) return;
 
   testBtn.disabled = true;
-  testBtn.textContent = "Running…";
+  testBtn.textContent = "Processing…";
+  $("#outputPreview").textContent = "Running safely on CPU worker…";
 
   try {
-    const m = await ensureModel();
-    const output = await m.predict(testImageCanvas, PRODUCTION_INPUT_SIZE);
-    $("#outputPreview").replaceChildren(output);
+    const result = await runProductionInference(testImageCanvas);
+    const outputCanvas = document.createElement("canvas");
+    outputCanvas.width = result.width;
+    outputCanvas.height = result.height;
+
+    const rgba = new Uint8ClampedArray(result.buffer);
+    outputCanvas
+      .getContext("2d", { willReadFrequently: false })
+      .putImageData(new ImageData(rgba, result.width, result.height), 0, 0);
+
+    $("#outputPreview").replaceChildren(outputCanvas);
     setTrainingStatus("Inference complete");
     $("#testHint").textContent =
-      "512×512 production model · output generated locally in this browser.";
+      "512×512 production model · CPU worker · Chrome GPU acceleration disabled for stability.";
   } catch (error) {
-    $("#outputPreview").textContent = error.message;
-    $("#testHint").textContent = error.message;
+    $("#outputPreview").textContent = "Inference failed";
+    $("#testHint").textContent = error?.message || String(error);
   } finally {
     testBtn.disabled = false;
     testBtn.textContent = "Run model";
-  }
-};
-
-$("#exportBtn").onclick = async () => {
-  const btn = $("#exportBtn");
-  try {
-    const m = await ensureModel();
-    await m.exportWeights();
-  } catch (error) {
-    btn.textContent = "Export failed";
-    setTimeout(() => btn.textContent = "Export model", 1500);
-    console.error(error);
   }
 };
 
@@ -578,32 +649,7 @@ $("#importInput").onchange = async (e) => {
   const btn = $("#importBtn");
 
   try {
-    const m = new TinyImageModel({ version: 3, mode: "production" });
-    await m.loadWeights(files);
-    model?.dispose();
-    model = m;
-    state.modelVersion = m.version;
-    saveState({
-      pairCount: state.pairs.length,
-      modelVersion: m.version,
-      losses: state.losses,
-    });
-
-    $("#version").textContent = "v" + m.version;
-    $("#modelBadge").textContent = "MODEL v" + m.version;
-    $("#modelParams").textContent = m.parameterCount.toLocaleString();
-    $("#modelSize").textContent =
-      (m.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
-    $("#modelArch").textContent = m.architecture;
-
-    btn.textContent = "Imported v" + m.version;
-    setTimeout(() => btn.textContent = "Import model", 1500);
-  } catch (error) {
-    btn.textContent = error.message.slice(0, 40);
-    setTimeout(() => btn.textContent = "Import model", 2000);
-    console.error(error);
-  }
-};
+    const m = new TinyImageModel({ version: 3, mode: "produ
 
 (() => {
   render();
