@@ -9,3 +9,8 @@ train/benchmarks/
 
 train/checkpoints/
 train/evaluation/
+
+train/data/cache512/
+train/data/originals/*.pdf
+train/data/processed/*.pdf
+train/__pycache__/
