@@ -1,6 +1,6 @@
 import { addPdfDataset, listPairs, getDocument, getCachedPage, cachePage } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, PRODUCTION_INPUT_SIZE, canvasToRGB8 } from "./model.js";
+import { TinyImageModel, INPUT_SIZE, PRODUCTION_INPUT_SIZE, canvasToRGB8 } from "./model.js";
 import { pdfPageCount, openPdf, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state = { pairs: await listPairs(), training: false, losses: [], ...loadState() };
@@ -284,19 +284,19 @@ async function prepareTrainingCache(pairs) {
       for (const pair of group) {
         const cached = await getCachedPage(pair.uuid);
 
-        if (!(cached?.size === PRODUCTION_INPUT_SIZE && cached.original && cached.target)) {
-          const originalCanvas = await renderPdfPage(opdf, pair.originalPage, PRODUCTION_INPUT_SIZE);
+        if (!(cached?.size === INPUT_SIZE && cached.original && cached.target)) {
+          const originalCanvas = await renderPdfPage(opdf, pair.originalPage, INPUT_SIZE);
           const original = canvasToRGB8(originalCanvas);
           releaseCanvas(originalCanvas);
 
           await yieldToBrowser();
 
-          const targetCanvas = await renderPdfPage(ppdf, pair.processedPage, PRODUCTION_INPUT_SIZE);
+          const targetCanvas = await renderPdfPage(ppdf, pair.processedPage, INPUT_SIZE);
           const target = canvasToRGB8(targetCanvas);
           releaseCanvas(targetCanvas);
 
           await cachePage(pair.uuid, {
-            size: PRODUCTION_INPUT_SIZE,
+            size: INPUT_SIZE,
             original,
             target,
           });
