@@ -193,7 +193,6 @@ async function ensureModel() {
     $("#modelParams").textContent = model.parameterCount;
     $("#modelSize").textContent = (model.parameterCount * 4) + " B";
     $("#modelArch").textContent = model.architecture;
-    reportMemory("model-ready");
   }
 
   return model;
@@ -426,7 +425,6 @@ $("#importInput").onchange = async (e) => {
 
     btn.textContent = "Imported v" + m.version;
     setTimeout(() => btn.textContent = "Import model", 1500);
-    reportMemory("model-imported");
   } catch (error) {
     btn.textContent = error.message.slice(0, 40);
     setTimeout(() => btn.textContent = "Import model", 2000);

@@ -240,16 +240,15 @@ async function runTraining(pairs) {
       });
     }
 
+    const finalVersion = model.version;
+    model.dispose();
     self.postMessage({
       type: "done",
-      version: model.version,
+      version: finalVersion,
       backend,
       memory: memorySnapshot(tf, "done"),
     });
-  } finally {
-    model.dispose();
   }
-}
 
 self.addEventListener("message", async (event) => {
   if (!event.data || event.data.type !== "start") return;
