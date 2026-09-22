@@ -30,7 +30,7 @@ $CheckpointDir = Join-Path $TrainDir "checkpoints\scaled-512-b48-eager"
 $Checkpoint = Join-Path $CheckpointDir "checkpoint.pt"
 if (-not (Test-Path $Checkpoint)) { throw "Training finished without a checkpoint: $Checkpoint" }
 
-& $Python -c 'import torch,sys; p=sys.argv[1]; target=int(sys.argv[2]); s=torch.load(p,map_location="cpu",weights_only=False); ok=int(s.get("epoch",0)) >= target and bool(s.get("bn_calibrated",False)); print("epoch="+str(s.get("epoch",0))); print("bn_calibrated="+str(bool(s.get("bn_calibrated",False)))); sys.exit(0 if ok else 2)' $Checkpoint $Epochs
+& $Python -c "import torch,sys; p=sys.argv[1]; target=int(sys.argv[2]); s=torch.load(p,map_location='cpu',weights_only=False); ok=int(s.get('epoch',0)) >= target and bool(s.get('bn_calibrated',False)); print('epoch='+str(s.get('epoch',0))); print('bn_calibrated='+str(bool(s.get('bn_calibrated',False)))); sys.exit(0 if ok else 2)" $Checkpoint $Epochs
 if ($LASTEXITCODE -ne 0) {
   Write-Host ""
   Write-Host "Training is resumable but has not reached the requested target yet." -ForegroundColor Yellow
