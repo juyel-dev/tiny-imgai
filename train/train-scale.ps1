@@ -1,5 +1,5 @@
 param(
-  [int]$BaseChannels = 32,
+  [int]$BaseChannels = 48,
   [int]$Epochs = 3,
   [int]$MaxPages = 0,
   [int]$MaxMinutes = 120,
@@ -7,17 +7,47 @@ param(
   [int]$Threads = 6,
   [switch]$ActivationCheckpointing,
   [int]$MinFreeRamMiB = 768,
-  [int]$MaxRssMiB = 3072
+  [int]$MaxRssMiB = 2048
 )
 
 $ErrorActionPreference = "Stop"
 $TrainDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $TrainDir
 $Python = Join-Path $TrainDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $Python)) { throw "Python venv not found. Run .\train-python.ps1 first." }
+
+if (-not (Test-Path $Python)) {
+  throw "Python venv not found. Run .\train-python.ps1 first."
+}
+
 & $Python -m pip install -r .\requirements-python.txt
-if ($LASTEXITCODE -ne 0) { throw "Dependency check failed with code $LASTEXITCODE." }
-$Args = @(".\train-scale.py","--base-channels",$BaseChannels,"--epochs",$Epochs,"--max-pages",$MaxPages,"--max-minutes",$MaxMinutes,"--learning-rate",$LearningRate,"--threads",$Threads,"--min-free-ram-mib",$MinFreeRamMiB,"--max-rss-mib",$MaxRssMiB)
-if ($ActivationCheckpointing) { $Args += "--activation-checkpointing" }
+if ($LASTEXITCODE -ne 0) {
+  throw "Dependency check failed with code $LASTEXITCODE."
+}
+
+$Args = @(
+  ".\train-scale.py",
+  "--base-channels", $BaseChannels,
+  "--epochs", $Epochs,
+  "--max-pages", $MaxPages,
+  "--max-minutes", $MaxMinutes,
+  "--learning-rate", $LearningRate,
+  "--threads", $Threads,
+  "--min-free-ram-mib", $MinFreeRamMiB,
+  "--max-rss-mib", $MaxRssMiB
+)
+
+if ($ActivationCheckpointing) {
+  $Args += "--activation-checkpointing"
+}
+
+Write-Host ""
+Write-Host "tiny-imgai production trainer" -ForegroundColor Cyan
+Write-Host "512x512 U-Net | base width $BaseChannels | print-clean-v1"
+Write-Host "Pages: $(if ($MaxPages -eq 0) { 'all' } else { $MaxPages }) | epochs: $Epochs | threads: $Threads"
+Write-Host "RAM guard: free >= $MinFreeRamMiB MiB | RSS <= $MaxRssMiB MiB"
+Write-Host ""
+
 & $Python @Args
-if ($LASTEXITCODE -ne 0) { throw "Scalable training exited with code $LASTEXITCODE." }
+if ($LASTEXITCODE -ne 0) {
+  throw "Scalable training exited with code $LASTEXITCODE."
+}
