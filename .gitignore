@@ -4,3 +4,4 @@ node_modules/
 
 train/.venv/
 train/data/cache256/
+train/data/manifest.json
