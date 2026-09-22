@@ -80,13 +80,22 @@
         <span class="muted">New image → model → output</span>
       </div>
 
-      <div class="preview-grid">
-        <div class="image-panel"><label>INPUT</label><div class="image-box checker" id="inputPreview">Upload an image</div></div>
-        <div class="arrow">→</div>
-        <div class="image-panel"><label>AI OUTPUT</label><div class="image-box checker" id="outputPreview">Model output</div></div>
-        <div class="image-panel"><label>TARGET</label><div class="image-box checker" id="targetPreview">Optimized reference</div></div>
+      <div class="image-test">
+        <div class="image-test-dropzone" id="testImageDropzone">
+          <strong>Drop an image here</strong>
+          <span id="testHint">PNG, JPG, WEBP — the production model runs at 512×512</span>
+          <button class="secondary" id="testChoose" type="button">Choose image</button>
+          <input id="testImageInput" type="file" accept="image/*" hidden>
+        </div>
       </div>
-      <button class="secondary" id="testBtn" disabled>Test model</button>
+
+      <div class="preview-grid">
+        <div class="image-panel"><label>INPUT · 512×512</label><div class="image-box checker" id="inputPreview">Upload an image above</div></div>
+        <div class="arrow">→</div>
+        <div class="image-panel"><label>AI OUTPUT · 512×512</label><div class="image-box checker" id="outputPreview">Production model output</div></div>
+        <div class="image-panel"><label>FILE</label><div class="image-box checker" id="targetPreview">No image selected</div></div>
+      </div>
+      <button class="primary" id="testBtn" disabled>Run model</button>
     </section>
 
     <aside class="model-panel">
