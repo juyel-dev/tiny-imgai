@@ -6,7 +6,18 @@ const PDFJS_MODULE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.
 let pdfjsPromise = null;
 
 async function loadPdfJs() {
-  if (!pdfjsPromise) pdfjsPromise = import(PDFJS_MODULE);
+  if (!pdfjsPromise) {
+    pdfjsPromise = import(PDFJS_MODULE).then((lib) => {
+      // PDF.js still consults GlobalWorkerOptions.workerSrc in worker
+      // contexts while resolving its document worker machinery. Supplying
+      // the official worker module avoids the otherwise-fatal "No
+      // GlobalWorkerOptions.workerSrc specified" error. We still pass
+      // disableWorker below so PDF parsing stays inside this training worker.
+      lib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs";
+      return lib;
+    });
+  }
   return pdfjsPromise;
 }
 
