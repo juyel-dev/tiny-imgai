@@ -106,6 +106,8 @@ def main() -> int:
     staging_dir.mkdir(parents=True, exist_ok=True)
     weights_path = staging_dir / "weights.bin"
     metadata_path = staging_dir / "metadata.json"
+    probe_input_path = staging_dir / "probe-input.bin"
+    probe_output_path = staging_dir / "probe-output.bin"
 
     offset = 0
     specs = []
@@ -125,6 +127,32 @@ def main() -> int:
             )
             offset += len(raw)
 
+    # Deterministic cross-runtime probe. The tf.js exporter consumes these
+    # raw float32 buffers and verifies numerical parity after binding weights.
+    probe_h = args.input_size
+    probe_w = args.input_size
+    probe_channels = 3
+    probe_values = np.linspace(
+        0.0,
+        1.0,
+        num=probe_h * probe_w * probe_channels,
+        dtype=np.float32,
+    ).reshape(1, probe_h, probe_w, probe_channels)
+    with torch.inference_mode():
+        probe_tensor = torch.from_numpy(
+            probe_values.transpose(0, 3, 1, 2).copy()
+        )
+        probe_output = (
+            model(probe_tensor)
+            .detach()
+            .cpu()
+            .numpy()
+            .transpose(0, 2, 3, 1)
+            .astype(np.float32)
+        )
+    np.ascontiguousarray(probe_values).tofile(probe_input_path)
+    np.ascontiguousarray(probe_output).tofile(probe_output_path)
+
     metadata = {
         "format": "tiny-imgai-torch-to-tfjs-staging-v1",
         "input_size": args.input_size,
@@ -137,6 +165,13 @@ def main() -> int:
         "weight_bytes": offset,
         "weights_file": weights_path.name,
         "weight_specs": specs,
+        "tfjs_parameter_count": exported_values,
+        "probe": {
+            "input_file": probe_input_path.name,
+            "output_file": probe_output_path.name,
+            "shape": [1, probe_h, probe_w, probe_channels],
+            "dtype": "float32",
+        },
         "checkpoint_epoch": checkpoint.get("epoch"),
         "checkpoint_global_step": checkpoint.get("global_step"),
         "bn_calibrated": bool(checkpoint.get("bn_calibrated", False)),
