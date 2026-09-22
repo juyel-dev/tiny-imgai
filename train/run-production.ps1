@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $TrainDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoDir = Split-Path -Parent $TrainDir
 Set-Location $TrainDir
 $Python = Join-Path $TrainDir ".venv\Scripts\python.exe"
 
@@ -40,9 +41,44 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Training target reached and BatchNorm is finalized." -ForegroundColor Green
-Write-Host "Running full 512px evaluation..." -ForegroundColor Cyan
-& .\evaluate-scale.ps1 -BaseChannels 48 -MaxPages $MaxPages -PreviewPages $PreviewPages -MaxRssMiB $MaxRssMiB -MinFreeRamMiB $MinFreeRamMiB
-if ($LASTEXITCODE -ne 0) { throw "Evaluation failed." }
+
+$checkpointState = & $Python -c "import torch,sys; s=torch.load(sys.argv[1],map_location='cpu',weights_only=False); print(str(s.get('epoch',0))+'|'+str(s.get('global_step',0)))" $Checkpoint
+if ($LASTEXITCODE -ne 0) { throw "Could not read checkpoint metadata." }
+$checkpointParts = $checkpointState.Split("|")
+$checkpointEpoch = [int]$checkpointParts[0]
+$checkpointStep = [int]$checkpointParts[1]
+
+$evaluationRoot = Join-Path $TrainDir "evaluation"
+$matchingEvaluation = $null
+if (Test-Path $evaluationRoot) {
+  foreach ($metricsPath in (Get-ChildItem $evaluationRoot -Directory -Filter "scale512-*" | Sort-Object LastWriteTime -Descending | ForEach-Object { Join-Path $_.FullName "metrics.json" })) {
+    if (-not (Test-Path $metricsPath)) { continue }
+    try {
+      $metrics = Get-Content $metricsPath -Raw | ConvertFrom-Json
+      $summary = $metrics.summary
+      if (
+        [int]$summary.checkpoint_epoch -eq $checkpointEpoch -and
+        [int]$summary.checkpoint_global_step -eq $checkpointStep -and
+        [int]$summary.input_size -eq 512 -and
+        [int]$summary.base_channels -eq 48
+      ) {
+        $matchingEvaluation = $metricsPath
+        break
+      }
+    } catch {
+      continue
+    }
+  }
+}
+
+if ($matchingEvaluation) {
+  Write-Host "Matching 512px/b48 evaluation already exists. Skipping repeat evaluation." -ForegroundColor Green
+  Write-Host "Metrics: $matchingEvaluation"
+} else {
+  Write-Host "Running full 512px evaluation..." -ForegroundColor Cyan
+  & .\evaluate-scale.ps1 -BaseChannels 48 -MaxPages $MaxPages -PreviewPages $PreviewPages -MaxRssMiB $MaxRssMiB -MinFreeRamMiB $MinFreeRamMiB
+  if ($LASTEXITCODE -ne 0) { throw "Evaluation failed." }
+}
 
 Write-Host ""
 Write-Host "Exporting production model for tf.js..." -ForegroundColor Cyan
@@ -50,6 +86,11 @@ Write-Host "Exporting production model for tf.js..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "tf.js export failed." }
 
 Write-Host ""
+Write-Host "Installing production model into web/models..." -ForegroundColor Cyan
+& .\install-browser-model.ps1
+if ($LASTEXITCODE -ne 0) { throw "Browser model installation failed." }
+
+Write-Host ""
 Write-Host "PRODUCTION PIPELINE COMPLETE" -ForegroundColor Green
 Write-Host "Checkpoint: $Checkpoint"
-Write-Host ("tf.js model: " + (Join-Path $TrainDir "checkpoints\tfjs-512-b48"))
+Write-Host ("tf.js model: " + (Join-Path $RepoDir "web\models\tfjs-512-b48"))
