@@ -1,10 +1,10 @@
-name: Train tiny-imgai model
+name: Train legacy 256px tiny-imgai model
 
-# Manually triggered on purpose — training is a deliberate, resumable
-# action, not something that should fire on every push. Each run picks
+# Legacy workflow: the validated production path is now local Python + PyTorch
+# at 512px/b48. Keep this workflow manual for compatibility with the older
+# Node/tf.js 256px model. Each run picks
 # up from train/checkpoints/model (if present) and trains for up to
-# max_minutes, then commits the updated checkpoint back to the repo.
-# Trigger again (same inputs or different) to keep resuming.
+# max_minutes, then commits the legacy checkpoint back to the repo.
 
 on:
   workflow_dispatch:
