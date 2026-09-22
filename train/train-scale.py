@@ -183,7 +183,7 @@ def main() -> int:
             global_step += 1
             page_index += 1
             with loss_log.open("a", encoding="utf-8") as handle:
-                handle.write(f"{epoch},{record.page_number},{global_step},{value:.8f},{elapsed:.4f},{time.strftime("%Y-%m-%dT%H:%M:%S")}\n")
+                handle.write(f"{epoch},{record.page_number},{global_step},{value:.8f},{elapsed:.4f},{time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
             print(f"page {record.page_number}/{len(records)} loss {value:.5f} step {global_step} {elapsed:.2f}s/page", flush=True)
             del pred, loss, x, y
 
