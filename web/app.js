@@ -1,6 +1,6 @@
 import { addPdfDataset, listPairs, getDocument, getCachedPage, cachePage } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, INPUT_SIZE, canvasToRGB8 } from "./model.js";
+import { TinyImageModel, PRODUCTION_INPUT_SIZE, canvasToRGB8 } from "./model.js";
 import { pdfPageCount, openPdf, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state = { pairs: await listPairs(), training: false, losses: [], ...loadState() };
@@ -22,7 +22,7 @@ function render() {
   pairCount.textContent = state.pairs.length;
   trainDataset.textContent = state.pairs.length + " pair" + (state.pairs.length === 1 ? "" : "s");
   trainBtn.disabled = state.pairs.length === 0 || state.training;
-  testBtn.disabled = state.pairs.length === 0 || state.training;
+  testBtn.disabled = !testImageCanvas || state.training;
   datasetList.innerHTML = state.pairs.length
     ? state.pairs.slice(-8).reverse().map((p) =>
         `<div class="pair"><span class="pair-id">#${p.pageNumber} · page ${p.originalPage} ↔ page ${p.processedPage}</span><span class="pair-status">ready</span></div>`
@@ -175,24 +175,29 @@ function releaseCanvas(canvas) {
 async function ensureModel() {
   if (!model) {
     const tf = window.tf;
-    if (!tf) throw new Error("tf.js did not load (check network / ad-blocker / CDN access)");
-
-    model = new TinyImageModel({ version: state.modelVersion ?? 0 });
-
-    try {
-      await model.loadFromBrowserStorage();
-      $("#trainStatus").textContent = "Resumed saved model from this browser";
-    } catch {
-      await model.init();
+    if (!tf) {
+      throw new Error("tf.js did not load (check network / ad-blocker / CDN access)");
     }
 
+    model = new TinyImageModel({
+      version: state.modelVersion ?? 3,
+      mode: "production",
+    });
+
+    setTrainingStatus("Loading 512×512 production model…");
+    const metadata = await model.loadProductionModel();
+
     $("#engineStatus").textContent = "tf.js backend: " + tf.getBackend();
-    $("#modelRuntime").textContent = tf.getBackend();
+    $("#modelRuntime").textContent = tf.getBackend() + " · production";
     $("#version").textContent = "v" + model.version;
-    $("#modelBadge").textContent = "MODEL v" + model.version;
-    $("#modelParams").textContent = model.parameterCount;
-    $("#modelSize").textContent = (model.parameterCount * 4) + " B";
+    $("#modelBadge").textContent = "PRODUCTION v" + model.version;
+    $("#modelParams").textContent = model.parameterCount.toLocaleString();
+    $("#modelSize").textContent =
+      (model.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
     $("#modelArch").textContent = model.architecture;
+    $("#trainStatus").textContent =
+      "Production model loaded · " +
+      (Number(metadata.pages_evaluated || 335) ? "512px inference ready" : "inference ready");
   }
 
   return model;
@@ -273,19 +278,19 @@ async function prepareTrainingCache(pairs) {
       for (const pair of group) {
         const cached = await getCachedPage(pair.uuid);
 
-        if (!(cached?.size === INPUT_SIZE && cached.original && cached.target)) {
-          const originalCanvas = await renderPdfPage(opdf, pair.originalPage, INPUT_SIZE);
+        if (!(cached?.size === PRODUCTION_INPUT_SIZE && cached.original && cached.target)) {
+          const originalCanvas = await renderPdfPage(opdf, pair.originalPage, PRODUCTION_INPUT_SIZE);
           const original = canvasToRGB8(originalCanvas);
           releaseCanvas(originalCanvas);
 
           await yieldToBrowser();
 
-          const targetCanvas = await renderPdfPage(ppdf, pair.processedPage, INPUT_SIZE);
+          const targetCanvas = await renderPdfPage(ppdf, pair.processedPage, PRODUCTION_INPUT_SIZE);
           const target = canvasToRGB8(targetCanvas);
           releaseCanvas(targetCanvas);
 
           await cachePage(pair.uuid, {
-            size: INPUT_SIZE,
+            size: PRODUCTION_INPUT_SIZE,
             original,
             target,
           });
@@ -449,45 +454,99 @@ trainBtn.onclick = () => {
   });
 };
 
+let testImageCanvas = null;
+
+async function loadTestImage(file) {
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Please select a PNG, JPG, WEBP, or other image file.");
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = imageToCanvasFromBitmap(bitmap, PRODUCTION_INPUT_SIZE);
+    releaseCanvas(testImageCanvas);
+    testImageCanvas = canvas;
+
+    $("#inputPreview").replaceChildren(canvas);
+    $("#outputPreview").textContent = "Ready — click Run model";
+    $("#targetPreview").textContent = file.name;
+    $("#testBtn").disabled = false;
+    $("#testHint").textContent =
+      "Input resized to 512×512 for production inference.";
+  } finally {
+    bitmap.close();
+  }
+}
+
+function imageToCanvasFromBitmap(bitmap, size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  canvas.getContext("2d", { willReadFrequently: true }).drawImage(
+    bitmap,
+    0,
+    0,
+    size,
+    size
+  );
+  return canvas;
+}
+
+const testInput = $("#testImageInput");
+const testDropzone = $("#testImageDropzone");
+
+testDropzone.ondragover = (event) => {
+  event.preventDefault();
+  testDropzone.classList.add("is-ready");
+};
+
+testDropzone.ondragleave = () => {
+  testDropzone.classList.remove("is-ready");
+};
+
+testDropzone.ondrop = async (event) => {
+  event.preventDefault();
+  testDropzone.classList.remove("is-ready");
+  try {
+    await loadTestImage(event.dataTransfer.files[0]);
+  } catch (error) {
+    $("#testHint").textContent = error.message;
+  }
+};
+
+testInput.onchange = async (event) => {
+  try {
+    await loadTestImage(event.target.files[0]);
+  } catch (error) {
+    $("#testHint").textContent = error.message;
+  } finally {
+    event.target.value = "";
+  }
+};
+
+$("#testChoose").onclick = () => testInput.click();
+
 testBtn.onclick = async () => {
-  if (!state.pairs.length) return;
+  if (!testImageCanvas) return;
+
+  testBtn.disabled = true;
+  testBtn.textContent = "Running…";
 
   try {
     const m = await ensureModel();
-    const p = state.pairs.find((x) => x.originalDocId && x.processedDocId);
-    if (!p) throw new Error("No PDF-backed pair available.");
-
-    const dbModule = await import("./dataset.js");
-    const pdfModule = await import("./pdf.js");
-    const [od, pd] = await Promise.all([
-      dbModule.getDocument(p.originalDocId),
-      dbModule.getDocument(p.processedDocId),
-    ]);
-    const [opdf, ppdf] = await Promise.all([
-      pdfModule.openPdf(od.blob),
-      pdfModule.openPdf(pd.blob),
-    ]);
-
-    try {
-      const input = await pdfModule.renderPdfPage(opdf, p.originalPage, INPUT_SIZE);
-      const target = await pdfModule.renderPdfPage(ppdf, p.processedPage, INPUT_SIZE);
-
-      try {
-        const output = await m.predict(input);
-        $("#inputPreview").replaceChildren(input);
-        $("#targetPreview").replaceChildren(target);
-        $("#outputPreview").replaceChildren(output);
-      } catch (error) {
-        releaseCanvas(input);
-        releaseCanvas(target);
-        throw error;
-      }
-    } finally {
-      await pdfModule.disposePdf(opdf);
-      await pdfModule.disposePdf(ppdf);
-    }
+    const output = await m.predict(testImageCanvas, PRODUCTION_INPUT_SIZE);
+    $("#outputPreview").replaceChildren(output);
+    setTrainingStatus("Inference complete");
+    $("#testHint").textContent =
+      "512×512 production model · output generated locally in this browser.";
   } catch (error) {
     $("#outputPreview").textContent = error.message;
+    $("#testHint").textContent = error.message;
+  } finally {
+    testBtn.disabled = false;
+    testBtn.textContent = "Run model";
   }
 };
 
@@ -513,12 +572,11 @@ $("#importInput").onchange = async (e) => {
   const btn = $("#importBtn");
 
   try {
-    const m = await ensureModel();
+    const m = new TinyImageModel({ version: 3, mode: "production" });
     await m.loadWeights(files);
-    m.version++;
+    model?.dispose();
+    model = m;
     state.modelVersion = m.version;
-
-    await m.saveToBrowserStorage();
     saveState({
       pairCount: state.pairs.length,
       modelVersion: m.version,
@@ -527,7 +585,10 @@ $("#importInput").onchange = async (e) => {
 
     $("#version").textContent = "v" + m.version;
     $("#modelBadge").textContent = "MODEL v" + m.version;
-    $("#modelParams").textContent = m.parameterCount;
+    $("#modelParams").textContent = m.parameterCount.toLocaleString();
+    $("#modelSize").textContent =
+      (m.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
+    $("#modelArch").textContent = m.architecture;
 
     btn.textContent = "Imported v" + m.version;
     setTimeout(() => btn.textContent = "Import model", 1500);
