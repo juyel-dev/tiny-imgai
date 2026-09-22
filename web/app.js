@@ -314,8 +314,9 @@ trainBtn.onclick = async () => {
       : "cache hit — no PDF rendering needed";
 
     const epochs = 20;
-    // Keep the full 256×256 experiment; reduce only simultaneous GPU work.
-    const batchSize = 1;
+    // Keep the full 256×256 experiment. Batch 2 is the first speed step;
+    // trainOnBatch() now gives us deterministic one-update-per-batch cleanup.
+    const batchSize = 2;
     const totalBatches = [...groups.values()]
       .reduce((n, g) => n + Math.ceil(g.length / batchSize), 0);
 
@@ -359,7 +360,11 @@ trainBtn.onclick = async () => {
             batch.length = 0;
           }
 
-          await new Promise(requestAnimationFrame);
+          // Yield often enough for UI updates, but don't force a
+          // full animation frame wait after every training batch.
+          if (completedBatches % 4 === 0 || completedBatches === totalBatches) {
+            await new Promise(requestAnimationFrame);
+          }
         }
       }
 
