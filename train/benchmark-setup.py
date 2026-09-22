@@ -18,11 +18,11 @@ def parse_args() -> argparse.Namespace:
     train_dir = Path(__file__).resolve().parent
     p.add_argument("--data-dir", default=str(train_dir / "data"))
     p.add_argument("--pages", type=int, default=4, help="Number of cached pages to use.")
-    p.add_argument("--steps", type=int, default=3, help="Measured training steps per configuration.")
-    p.add_argument("--warmup", type=int, default=1, help="Warmup steps per configuration.")
-    p.add_argument("--threads", default="1,2,4,6,8")
-    p.add_argument("--batches", default="1,2")
-    p.add_argument("--formats", default="contiguous,channels_last")
+    p.add_argument("--steps", type=int, default=15, help="Measured training steps per configuration.")
+    p.add_argument("--warmup", type=int, default=3, help="Warmup steps per configuration.")
+    p.add_argument("--threads", default="5,6,7,8")
+    p.add_argument("--batches", default="1,2,3,4")
+    p.add_argument("--formats", default="channels_last")
     return p.parse_args()
 
 
@@ -143,6 +143,8 @@ def run_config(
         "status": "OK",
         "step_s": round(avg_step, 4),
         "page_s": round(avg_step / batch_size, 4),
+        "min_step_s": round(min(times), 4),
+        "max_step_s": round(max(times), 4),
         "loss": round(last_loss, 6),
         "error": "",
     }
