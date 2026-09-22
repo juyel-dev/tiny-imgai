@@ -232,16 +232,14 @@ def main() -> int:
     start_epoch = epoch
 
     if epoch >= args.epochs and bn_calibrated:
-        print("
-Checkpoint already reaches the requested target and is finalized.")
+        print("\nCheckpoint already reaches the requested target and is finalized.")
         print(f"Final checkpoint: {checkpoint_path}")
         return 0
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     if not loss_log.exists():
         loss_log.write_text(
-            "epoch,page,global_step,loss,seconds_per_page,timestamp
-",
+            "epoch,page,global_step,loss,seconds_per_page,timestamp\n",
             encoding="utf-8",
         )
 
@@ -254,8 +252,7 @@ Checkpoint already reaches the requested target and is finalized.")
         epoch_started = time.monotonic()
         current_page = page_index if epoch == start_epoch else 0
 
-        print(f"
-== epoch {epoch + 1}/{args.epochs} ==")
+        print(f"\n== epoch {epoch + 1}/{args.epochs} ==")
 
         while current_page < len(records):
             mem = memory_state(process, args)
@@ -316,8 +313,7 @@ Checkpoint already reaches the requested target and is finalized.")
                 handle.write(
                     f"{epoch},{record.page_number},{global_step},"
                     f"{value:.8f},{elapsed:.4f},"
-                    f"{time.strftime('%Y-%m-%dT%H:%M:%S')}
-"
+                    f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\n"
                 )
 
             print(
@@ -372,8 +368,7 @@ Checkpoint already reaches the requested target and is finalized.")
         )
         print(f"checkpoint saved: {checkpoint_path}")
 
-    print("
-Target epoch reached. Finalizing BatchNorm over all selected pages...")
+    print("\nTarget epoch reached. Finalizing BatchNorm over all selected pages...")
     model.eval()
     bn_count = calibrate_batchnorm(
         model,
