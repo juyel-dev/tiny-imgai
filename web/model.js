@@ -37,7 +37,7 @@ function batchBytesToTensor(bytesArray, size) {
     for (let i = 0; i < pixels; i++) packed[offset + i] = src[i] / 255;
   }
 
-  return window.tf.tensor4d(packed, [count, size, size, 3], "float32");
+  return globalThis.tf.tensor4d(packed, [count, size, size, 3], "float32");
 }
 
 const OPTIMIZER_LR = 1e-3;
@@ -59,7 +59,7 @@ export class TinyImageModel {
   compile() {
     if (!this.model) throw new Error("Model is not initialized.");
     this.model.compile({
-      optimizer: window.tf.train.adam(OPTIMIZER_LR),
+      optimizer: globalThis.tf.train.adam(OPTIMIZER_LR),
       loss: "meanSquaredError",
     });
   }
@@ -76,7 +76,7 @@ export class TinyImageModel {
   }
 
   async init() {
-    const tf = window.tf;
+    const tf = globalThis.tf;
     if (!tf) throw new Error("tf.js did not load (check network / CDN block)");
     this.dispose();
     this.model = buildModel(tf, INPUT_SIZE);
@@ -84,7 +84,7 @@ export class TinyImageModel {
   }
 
   async loadFromBrowserStorage() {
-    const tf = window.tf;
+    const tf = globalThis.tf;
     if (!tf) throw new Error("tf.js did not load (check network / CDN block)");
     const nextModel = await tf.loadLayersModel("indexeddb://tiny-imgai-model");
     this.dispose();
@@ -103,7 +103,7 @@ export class TinyImageModel {
       throw new Error("Input/target batch mismatch.");
     }
 
-    const tf = window.tf;
+    const tf = globalThis.tf;
     let x = null;
     let y = null;
 
@@ -122,7 +122,7 @@ export class TinyImageModel {
 
   async predict(canvas) {
     if (!this.model) throw new Error("Model is not initialized.");
-    const tf = window.tf;
+    const tf = globalThis.tf;
     const size = canvas.width;
     const x = tf.tidy(() =>
       tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0)
@@ -150,7 +150,7 @@ export class TinyImageModel {
   }
 
   async loadWeights(fileList) {
-    const tf = window.tf;
+    const tf = globalThis.tf;
     if (!fileList?.length) throw new Error("No model files selected.");
     const nextModel = await tf.loadLayersModel(
       tf.io.browserFiles(Array.from(fileList))

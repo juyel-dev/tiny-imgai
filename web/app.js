@@ -1,7 +1,7 @@
-import { addPdfDataset, getCachedPage, cachePage, getDocument, listPairs } from "./dataset.js";
+import { addPdfDataset, listPairs } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, INPUT_SIZE, canvasToRGB8 } from "./model.js";
-import { openPdf, pdfPageCount, renderPdfPage, disposePdf } from "./pdf.js";
+import { TinyImageModel, INPUT_SIZE } from "./model.js";
+import { pdfPageCount } from "./pdf.js";
 
 const state = { pairs: await listPairs(), training: false, losses: [], ...loadState() };
 const $ = (s) => document.querySelector(s);
@@ -12,6 +12,7 @@ const trainBtn = $("#trainBtn");
 const testBtn = $("#testBtn");
 
 let model = null;
+let trainingWorker = null;
 let originalFile = null;
 let processedFile = null;
 let originalPages = 0;
@@ -164,24 +165,12 @@ function drawLoss() {
   $("#lossLine").setAttribute("points", pts);
 }
 
-function reportMemory(stage) {
-  const tf = window.tf;
-  if (!tf || typeof tf.memory !== "function") return;
-  const m = tf.memory();
-  const details = [
-    `stage=${stage}`,
-    `tensors=${m.numTensors}`,
-    `bytes=${m.numBytes}`,
-  ];
-  if (typeof m.numBytesInGPU === "number") details.push(`gpuBytes=${m.numBytesInGPU}`);
-  console.debug("[tiny-imgai memory]", details.join(" "));
-}
-
 function releaseCanvas(canvas) {
   if (!canvas) return;
   canvas.width = 0;
   canvas.height = 0;
 }
+
 
 async function ensureModel() {
   if (!model) {
@@ -210,200 +199,149 @@ async function ensureModel() {
   return model;
 }
 
-function groupedPdfResources() {
-  const groups = new Map();
-  for (const p of state.pairs.filter((p) => p.originalDocId && p.processedDocId)) {
-    const key = p.originalDocId + "|" + p.processedDocId;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
+function setTrainingStatus(text) {
+  $("#trainStatus").textContent = text;
+}
+
+function updateModelUi(info) {
+  if (!info) return;
+  if (info.backend) {
+    $("#engineStatus").textContent = "tf.js worker: " + info.backend;
+    $("#modelRuntime").textContent = info.backend + " · worker";
   }
-  return groups;
+  if (info.parameterCount) $("#modelParams").textContent = info.parameterCount;
+  if (info.architecture) $("#modelArch").textContent = info.architecture;
+  if (info.parameterCount) $("#modelSize").textContent = (info.parameterCount * 4) + " B";
 }
 
-async function cacheTrainingDataset(groups) {
-  const allPairs = [...groups.values()].flat();
-  let ready = 0;
-  let created = 0;
-  const cacheSize = INPUT_SIZE;
-
-  $("#trainStatus").textContent = "Checking page cache";
-
-  for (const groupPairs of groups.values()) {
-    const first = groupPairs[0];
-    const [od, pd] = await Promise.all([
-      getDocument(first.originalDocId),
-      getDocument(first.processedDocId),
-    ]);
-
-    const [opdf, ppdf] = await Promise.all([
-      openPdf(od.blob),
-      openPdf(pd.blob),
-    ]);
-
-    try {
-      for (const p of groupPairs) {
-        const cached = await getCachedPage(p.uuid);
-
-        if (cached?.size === cacheSize && cached.original && cached.target) {
-          ready++;
-        } else {
-          const a = await renderPdfPage(opdf, p.originalPage, cacheSize);
-          const original = canvasToRGB8(a);
-          releaseCanvas(a);
-
-          const b = await renderPdfPage(ppdf, p.processedPage, cacheSize);
-          const target = canvasToRGB8(b);
-          releaseCanvas(b);
-
-          await cachePage(p.uuid, {
-            size: cacheSize,
-            original,
-            target,
-          });
-
-          ready++;
-          created++;
-        }
-
-        $("#trainStatus").textContent = `Caching pages ${ready}/${allPairs.length}`;
-        $("#progress").style.width = (ready / allPairs.length * 100) + "%";
-        reportMemory("cache-" + ready);
-        await new Promise(requestAnimationFrame);
-      }
-    } finally {
-      await disposePdf(opdf);
-      await disposePdf(ppdf);
-    }
-  }
-
-  return { total: allPairs.length, created };
+function disposeMainModel() {
+  if (!model) return;
+  model.dispose();
+  model = null;
 }
 
-async function readCachedBatch(batchPairs) {
-  return Promise.all(batchPairs.map(async (p) => {
-    const cached = await getCachedPage(p.uuid);
-    if (!cached?.original || !cached?.target) {
-      throw new Error(`Missing cached tensors for pair ${p.uuid}`);
-    }
-
-    return {
-      original: new Uint8Array(cached.original),
-      target: new Uint8Array(cached.target),
-    };
-  }));
+function finishTrainingWorker() {
+  if (!trainingWorker) return;
+  trainingWorker.terminate();
+  trainingWorker = null;
 }
 
-trainBtn.onclick = async () => {
+trainBtn.onclick = () => {
   if (state.training || !state.pairs.length) return;
 
+  disposeMainModel();
   state.training = true;
   state.losses = [];
   render();
 
-  $("#trainStatus").textContent = "Starting CNN";
-  $("#lossHint").textContent = "tf.js training loss";
+  setTrainingStatus("Starting background trainer");
+  $("#lossHint").textContent = "PDF preparation + training are running outside the UI thread";
+  $("#progress").style.width = "0%";
 
-  try {
-    const m = await ensureModel();
-    const groups = groupedPdfResources();
-    if (!groups.size) throw new Error("No PDF-backed training pairs found.");
+  trainingWorker = new Worker("./train-worker.js", { type: "module" });
 
-    const cache = await cacheTrainingDataset(groups);
-    $("#lossHint").textContent = cache.created
-      ? cache.created + " pages cached"
-      : "cache hit — no PDF rendering needed";
+  trainingWorker.onmessage = (event) => {
+    const msg = event.data || {};
 
-    const epochs = 20;
-    // Keep the full 256×256 experiment. Batch 2 is the first speed step;
-    // trainOnBatch() now gives us deterministic one-update-per-batch cleanup.
-    const batchSize = 1;
-    const totalBatches = [...groups.values()]
-      .reduce((n, g) => n + Math.ceil(g.length / batchSize), 0);
-
-    for (let epoch = 1; epoch <= epochs; epoch++) {
-      let epochLoss = 0;
-      let processedPairs = 0;
-      let completedBatches = 0;
-
-      for (const groupPairs of groups.values()) {
-        for (let start = 0; start < groupPairs.length; start += batchSize) {
-          const batchPairs = groupPairs.slice(start, start + batchSize);
-          const batch = await readCachedBatch(batchPairs);
-
-          try {
-            const loss = await m.trainBatch(
-              batch.map((x) => x.original),
-              batch.map((x) => x.target),
-              INPUT_SIZE
-            );
-
-            epochLoss += loss * batchPairs.length;
-            processedPairs += batchPairs.length;
-            completedBatches++;
-
-            const shouldUpdateUi =
-              completedBatches === 1 ||
-              completedBatches % 8 === 0 ||
-              completedBatches === totalBatches;
-
-            if (shouldUpdateUi) {
-              $("#step").textContent = (epoch - 1) * totalBatches + completedBatches;
-              $("#epoch").textContent = `${epoch} / ${epochs}`;
-              $("#loss").textContent = loss.toFixed(5);
-              $("#progress").style.width =
-                (completedBatches / totalBatches * 100) + "%";
-              $("#trainStatus").textContent =
-                `Training batch ${completedBatches}/${totalBatches}`;
-              reportMemory(`train-e${epoch}-b${completedBatches}`);
-            }
-          } finally {
-            batch.length = 0;
-          }
-
-          if (shouldUpdateUi) {
-            await new Promise(requestAnimationFrame);
-          }
-        }
-      }
-
-      const avg = epochLoss / Math.max(1, processedPairs);
-      state.losses.push(avg);
-      drawLoss();
-      $("#loss").textContent = avg.toFixed(5);
-
-      $("#trainStatus").textContent = `Saving checkpoint after epoch ${epoch}`;
-      await new Promise(requestAnimationFrame);
-      await m.saveToBrowserStorage();
-
-      m.version++;
-      state.modelVersion = m.version;
-      saveState({
-        pairCount: state.pairs.length,
-        modelVersion: m.version,
-        losses: state.losses,
-      });
-
-      $("#version").textContent = "v" + m.version;
-      $("#modelBadge").textContent = "MODEL v" + m.version;
-      reportMemory(`epoch-${epoch}-checkpointed`);
+    if (msg.type === "ready") {
+      updateModelUi(msg);
+      setTrainingStatus("Worker ready · " + msg.backend);
+      return;
     }
 
-    state.training = false;
-    $("#trainStatus").textContent = "Complete";
-    saveState({
-      pairCount: state.pairs.length,
-      modelVersion: m.version,
-      losses: state.losses,
-    });
-  } catch (error) {
-    console.error(error);
-    state.training = false;
-    $("#trainStatus").textContent = "Error";
-    $("#lossHint").textContent = error.message;
-  }
+    if (msg.type === "phase") {
+      if (msg.phase === "prepare") {
+        setTrainingStatus("Preparing " + msg.total + " pages in background");
+      } else if (msg.phase === "training") {
+        setTrainingStatus("Training " + msg.total + " pages · 256×256 · batch 1");
+        if (msg.memoryBytes) {
+          $("#lossHint").textContent =
+            "Worker dataset RAM: " + (msg.memoryBytes / 1048576).toFixed(1) + " MiB";
+        }
+      }
+      return;
+    }
 
-  render();
-  updatePairButton();
+    if (msg.type === "progress") {
+      const total = msg.total || 1;
+      const percent = Math.min(100, (msg.completed / total) * 100);
+      $("#progress").style.width = percent + "%";
+
+      if (msg.phase === "prepare") {
+        setTrainingStatus("Preparing page " + msg.completed + "/" + msg.total);
+      } else if (msg.phase === "training") {
+        $("#step").textContent = msg.completed;
+        $("#epoch").textContent = msg.epoch + " / " + msg.epochs;
+        $("#loss").textContent = Number(msg.loss).toFixed(5);
+        setTrainingStatus(
+          "Training epoch " + msg.epoch + " · page " + msg.completed + "/" + msg.total
+        );
+      }
+      return;
+    }
+
+    if (msg.type === "epoch") {
+      state.losses.push(msg.loss);
+      drawLoss();
+      $("#loss").textContent = Number(msg.loss).toFixed(5);
+      setTrainingStatus("Epoch " + msg.epoch + "/" + msg.epochs + " complete");
+      return;
+    }
+
+    if (msg.type === "checkpoint") {
+      state.modelVersion = msg.epoch;
+      saveState({
+        pairCount: state.pairs.length,
+        modelVersion: state.modelVersion,
+        losses: state.losses,
+      });
+      $("#version").textContent = "v" + msg.epoch;
+      $("#modelBadge").textContent = "MODEL v" + msg.epoch;
+      return;
+    }
+
+    if (msg.type === "done") {
+      state.training = false;
+      state.modelVersion = msg.version;
+      saveState({
+        pairCount: state.pairs.length,
+        modelVersion: state.modelVersion,
+        losses: state.losses,
+      });
+      $("#progress").style.width = "100%";
+      $("#epoch").textContent = "20 / 20";
+      setTrainingStatus("Complete · " + msg.backend);
+      finishTrainingWorker();
+      render();
+      updatePairButton();
+      return;
+    }
+
+    if (msg.type === "error") {
+      console.error("[tiny-imgai worker]", msg.message, msg.stack);
+      state.training = false;
+      setTrainingStatus("Training stopped");
+      $("#lossHint").textContent = msg.message;
+      finishTrainingWorker();
+      render();
+      updatePairButton();
+    }
+  };
+
+  trainingWorker.onerror = (error) => {
+    console.error("[tiny-imgai worker error]", error);
+    state.training = false;
+    setTrainingStatus("Training worker crashed");
+    $("#lossHint").textContent = "The background trainer stopped unexpectedly.";
+    finishTrainingWorker();
+    render();
+    updatePairButton();
+  };
+
+  trainingWorker.postMessage({
+    type: "start",
+    pairs: state.pairs,
+  });
 };
 
 testBtn.onclick = async () => {
@@ -414,18 +352,20 @@ testBtn.onclick = async () => {
     const p = state.pairs.find((x) => x.originalDocId && x.processedDocId);
     if (!p) throw new Error("No PDF-backed pair available.");
 
+    const dbModule = await import("./dataset.js");
+    const pdfModule = await import("./pdf.js");
     const [od, pd] = await Promise.all([
-      getDocument(p.originalDocId),
-      getDocument(p.processedDocId),
+      dbModule.getDocument(p.originalDocId),
+      dbModule.getDocument(p.processedDocId),
     ]);
     const [opdf, ppdf] = await Promise.all([
-      openPdf(od.blob),
-      openPdf(pd.blob),
+      pdfModule.openPdf(od.blob),
+      pdfModule.openPdf(pd.blob),
     ]);
 
     try {
-      const input = await renderPdfPage(opdf, p.originalPage, INPUT_SIZE);
-      const target = await renderPdfPage(ppdf, p.processedPage, INPUT_SIZE);
+      const input = await pdfModule.renderPdfPage(opdf, p.originalPage, INPUT_SIZE);
+      const target = await pdfModule.renderPdfPage(ppdf, p.processedPage, INPUT_SIZE);
 
       try {
         const output = await m.predict(input);
@@ -438,8 +378,8 @@ testBtn.onclick = async () => {
         throw error;
       }
     } finally {
-      await disposePdf(opdf);
-      await disposePdf(ppdf);
+      await pdfModule.disposePdf(opdf);
+      await pdfModule.disposePdf(ppdf);
     }
   } catch (error) {
     $("#outputPreview").textContent = error.message;
@@ -494,13 +434,7 @@ $("#importInput").onchange = async (e) => {
   }
 };
 
-(async () => {
-  try {
-    await ensureModel();
-  } catch (error) {
-    $("#engineStatus").textContent = "Model engine unavailable: " + error.message;
-  }
-
+(() => {
   render();
   updatePairButton();
 })();
