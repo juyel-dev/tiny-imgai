@@ -59,6 +59,34 @@ The default target is 3 epochs over all available pages, with a 120-minute
 wall-clock budget per invocation. A timeout or RAM guard saves progress; run
 the same command again to resume.
 
+## Browser deployment
+
+The browser uses the validated 512px b48 model at:
+
+```
+/web/models/tfjs-512-b48/model.json
+/web/models/tfjs-512-b48/weights.bin
+/web/models/tfjs-512-b48/metadata.json
+```
+
+The export directory is intentionally outside git because model binaries are
+generated artifacts. After a successful local export, install the browser
+copy with:
+
+```powershell
+cd "C:\Users\JUYEL\Documents\tiny-imgai"
+git pull
+cd ".\train"
+.\install-browser-model.ps1
+```
+
+Then verify the generated model folder and commit/deploy those three files.
+The web UI loads this production model by default and rejects a non-512px or
+non-production architecture.
+
+The export pipeline also generates a deterministic PyTorch output probe and
+checks it against tf.js before declaring export complete.
+
 ## Outputs
 
 After a completed run, the local `train/` tree contains:
