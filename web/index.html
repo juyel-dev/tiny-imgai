@@ -6,7 +6,6 @@
   <meta name="theme-color" content="#0b0d10">
   <title>tiny-imgai — Training Lab</title>
   <link rel="stylesheet" href="/web/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -51,7 +50,7 @@
 
     <section class="workspace training">
       <div class="section-head">
-        <div><div class="eyebrow">02 · TRAIN</div><h2>Legacy browser training</h2></div>
+        <div><div class="eyebrow">02 · TRAIN</div><h2>Training</h2></div>
         <div class="model-badge" id="modelBadge">MODEL v0</div>
       </div>
 
@@ -60,7 +59,7 @@
         <div class="train-row"><span>Epoch</span><b id="epoch">0 / 20</b></div>
         <div class="progress"><span id="progress"></span></div>
         <div class="train-stats"><div><small>Loss</small><strong id="loss">—</strong></div><div><small>Step</small><strong id="step">0</strong></div><div><small>Status</small><strong id="trainStatus">Idle</strong></div></div>
-        <button class="primary" id="trainBtn" disabled>Start legacy training</button>
+        <button class="primary" id="trainBtn" disabled>Browser training disabled</button>
       </div>
 
       <div class="loss-card">
@@ -99,18 +98,19 @@
     </section>
 
     <aside class="model-panel">
-      <div class="eyebrow">MODEL</div>
+      <div class="eyebrow">PRODUCTION MODEL</div>
       <h2>tiny-imgai</h2>
       <div class="model-info"><span>Version</span><b id="version">v0</b></div>
       <div class="model-info"><span>Parameters</span><b id="modelParams">—</b></div>
       <div class="model-info"><span>Model size</span><b id="modelSize">—</b></div>
       <div class="model-info"><span>Architecture</span><b id="modelArch">—</b></div>
-      <div class="model-info"><span>Runtime</span><b id="modelRuntime">tf.js (auto backend)</b></div>
+      <div class="model-info"><span>Runtime</span><b id="modelRuntime">CPU worker · not loaded</b></div>
       <hr>
-      <button class="secondary" id="exportBtn">Export model</button>
-      <button class="ghost" id="importBtn">Import model</button>
-      <small class="import-hint">Select both the .json and .bin file together</small>
-      <input id="importInput" type="file" accept="application/json,.json,.bin" multiple hidden>
+      <div class="production-note">
+        <strong>Production model</strong>
+        <span>512×512 · b48 · CPU inference worker</span>
+        <small>Training is performed locally with the validated PyTorch pipeline.</small>
+      </div>
     </aside>
   </main>
 
