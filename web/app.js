@@ -314,7 +314,8 @@ trainBtn.onclick = async () => {
       : "cache hit — no PDF rendering needed";
 
     const epochs = 20;
-    const batchSize = 2;
+    // Keep the full 256×256 experiment; reduce only simultaneous GPU work.
+    const batchSize = 1;
     const totalBatches = [...groups.values()]
       .reduce((n, g) => n + Math.ceil(g.length / batchSize), 0);
 
@@ -347,7 +348,13 @@ trainBtn.onclick = async () => {
             $("#trainStatus").textContent =
               `Training batch ${completedBatches}/${totalBatches}`;
 
-            reportMemory(`train-e${epoch}-b${completedBatches}`);
+            if (
+              completedBatches === 1 ||
+              completedBatches % 10 === 0 ||
+              completedBatches === totalBatches
+            ) {
+              reportMemory(`train-e${epoch}-b${completedBatches}`);
+            }
           } finally {
             batch.length = 0;
           }
@@ -361,9 +368,12 @@ trainBtn.onclick = async () => {
       drawLoss();
       $("#loss").textContent = avg.toFixed(5);
 
+      $("#trainStatus").textContent = `Saving checkpoint after epoch ${epoch}`;
+      await new Promise(requestAnimationFrame);
+      await m.saveToBrowserStorage();
+
       m.version++;
       state.modelVersion = m.version;
-      await m.saveToBrowserStorage();
       saveState({
         pairCount: state.pairs.length,
         modelVersion: m.version,
@@ -372,6 +382,7 @@ trainBtn.onclick = async () => {
 
       $("#version").textContent = "v" + m.version;
       $("#modelBadge").textContent = "MODEL v" + m.version;
+      reportMemory(`epoch-${epoch}-checkpointed`);
     }
 
     state.training = false;

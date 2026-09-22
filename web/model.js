@@ -110,12 +110,11 @@ export class TinyImageModel {
     try {
       x = batchBytesToTensor(inputBytesArray, size);
       y = batchBytesToTensor(targetBytesArray, size);
-      const history = await this.model.fit(x, y, {
-        epochs: 1,
-        batchSize: inputBytesArray.length,
-        verbose: 0,
-      });
-      return Number(history.history.loss[0]);
+      // One explicit gradient update for this batch. This avoids
+      // creating a full fit() history/callback cycle for every batch.
+      const result = await this.model.trainOnBatch(x, y);
+      const loss = Array.isArray(result) ? result[0] : result;
+      return Number(loss);
     } finally {
       tf.dispose([x, y]);
     }
