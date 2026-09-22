@@ -1,0 +1,16 @@
+{
+  "format": "tiny-imgai-tfjs-production-v1",
+  "input_size": 512,
+  "base_channels": 48,
+  "channels": [
+    48,
+    96,
+    192,
+    384
+  ],
+  "trainable_params": 4387299,
+  "checkpoint_epoch": 3,
+  "checkpoint_global_step": 1005,
+  "bn_calibrated": true,
+  "exported_at": "2026-09-22T19:51:39.730Z"
+}
