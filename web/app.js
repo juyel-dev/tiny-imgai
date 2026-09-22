@@ -1,6 +1,6 @@
 import { addPdfDataset, getCachedPage, cachePage, getDocument, listPairs } from "./dataset.js";
 import { loadState, saveState } from "./storage.js";
-import { TinyImageModel, imageToCanvas, canvasToRGB8 } from "./model.js";
+import { TinyImageModel, INPUT_SIZE, canvasToRGB8 } from "./model.js";
 import { openPdf, pdfPageCount, renderPdfPage, disposePdf } from "./pdf.js";
 
 const state={pairs:await listPairs(),training:false,losses:[],...loadState()};
@@ -98,9 +98,17 @@ function drawLoss(){
 
 async function ensureModel(){
   if(!model){
-    model=new TinyImageModel({version:state.modelVersion??0,weights:state.weights});
-    await model.init();
-    $("#engineStatus").textContent="WebGPU active";
+    const tf=window.tf;
+    if(!tf)throw new Error("tf.js did not load (check network / ad-blocker / CDN access)");
+    model=new TinyImageModel({version:state.modelVersion??0});
+    try{
+      await model.loadFromBrowserStorage();
+      $("#trainStatus").textContent="Resumed saved model from this browser";
+    }catch{
+      await model.init();
+    }
+    $("#engineStatus").textContent="tf.js backend: "+tf.getBackend();
+    $("#modelRuntime").textContent=tf.getBackend();
     $("#version").textContent="v"+model.version;
     $("#modelBadge").textContent="MODEL v"+model.version;
     $("#modelParams").textContent=model.parameterCount;
@@ -123,7 +131,7 @@ async function groupedPdfResources(){
 async function cacheTrainingDataset(groups){
   const allPairs=[...groups.values()].flat();
   let ready=0,created=0;
-  const cacheSize=64;
+  const cacheSize=INPUT_SIZE;
   $("#trainStatus").textContent="Checking page cache";
   for(const groupPairs of groups.values()){
     const first=groupPairs[0];
@@ -161,7 +169,7 @@ trainBtn.onclick=async()=>{
   if(state.training||!state.pairs.length)return;
   state.training=true;state.losses=[];render();
   $("#trainStatus").textContent="Starting CNN";
-  $("#lossHint").textContent="real WebGPU loss";
+  $("#lossHint").textContent="tf.js training loss";
   try{
     const m=await ensureModel();
     const groups=await groupedPdfResources();
@@ -178,13 +186,12 @@ trainBtn.onclick=async()=>{
         for(let start=0;start<groupPairs.length;start+=batchSize){
           const batchPairs=groupPairs.slice(start,start+batchSize);
           const batch=await readCachedBatch(batchPairs);
-          const result=await m.trainBatch(batch.map(x=>x.original),batch.map(x=>x.target));
-          m.applyGradient(result.grad);
-          epochLoss+=result.loss*batchPairs.length;
+          const loss=await m.trainBatch(batch.map(x=>x.original),batch.map(x=>x.target),INPUT_SIZE);
+          epochLoss+=loss*batchPairs.length;
           processedPairs+=batchPairs.length;completedBatches++;
           $("#step").textContent=(epoch-1)*totalBatches+completedBatches;
           $("#epoch").textContent=`${epoch} / ${epochs}`;
-          $("#loss").textContent=result.loss.toFixed(5);
+          $("#loss").textContent=loss.toFixed(5);
           $("#progress").style.width=(completedBatches/totalBatches*100)+"%";
           $("#trainStatus").textContent=`Training batch ${completedBatches}/${totalBatches}`;
           await new Promise(requestAnimationFrame);
@@ -192,15 +199,16 @@ trainBtn.onclick=async()=>{
       }
       const avg=epochLoss/processedPairs;
       state.losses.push(avg);drawLoss();$("#loss").textContent=avg.toFixed(5);
-      saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
+      m.version++;
+      state.modelVersion=m.version;
+      await m.saveToBrowserStorage();
+      saveState({pairCount:state.pairs.length,modelVersion:m.version,losses:state.losses});
+      $("#version").textContent="v"+m.version;
+      $("#modelBadge").textContent="MODEL v"+m.version;
     }
-    m.version++;
-    state.modelVersion=m.version;state.weights=[...m.weights];
     state.training=false;
     $("#trainStatus").textContent="Complete";
-    $("#modelBadge").textContent="MODEL v"+m.version;
-    $("#version").textContent="v"+m.version;
-    saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
+    saveState({pairCount:state.pairs.length,modelVersion:m.version,losses:state.losses});
   }catch(error){
     console.error(error);
     state.training=false;
@@ -217,7 +225,7 @@ testBtn.onclick=async()=>{
     if(!p)throw new Error("No PDF-backed pair available.");
     const [od,pd]=await Promise.all([getDocument(p.originalDocId),getDocument(p.processedDocId)]);
     const [opdf,ppdf]=await Promise.all([openPdf(od.blob),openPdf(pd.blob)]);
-    const [input,target]=await Promise.all([renderPdfPage(opdf,p.originalPage,64),renderPdfPage(ppdf,p.processedPage,64)]);
+    const [input,target]=await Promise.all([renderPdfPage(opdf,p.originalPage,INPUT_SIZE),renderPdfPage(ppdf,p.processedPage,INPUT_SIZE)]);
     const output=await m.predict(input);
     $("#inputPreview").replaceChildren(input);
     $("#targetPreview").replaceChildren(target);
@@ -230,11 +238,7 @@ $("#exportBtn").onclick=async()=>{
   const btn=$("#exportBtn");
   try{
     const m=await ensureModel();
-    const blob=new Blob([m.exportWeights()],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url;a.download=`tiny-imgai-model-v${m.version}.json`;a.click();
-    URL.revokeObjectURL(url);
+    await m.exportWeights();
   }catch(error){
     btn.textContent="Export failed";
     setTimeout(()=>btn.textContent="Export model",1500);
@@ -243,18 +247,20 @@ $("#exportBtn").onclick=async()=>{
 };
 $("#importBtn").onclick=()=>$("#importInput").click();
 $("#importInput").onchange=async e=>{
-  const file=e.target.files[0];
+  const files=e.target.files;
   e.target.value="";
-  if(!file)return;
+  if(!files||!files.length)return;
   const btn=$("#importBtn");
   try{
-    const saved=JSON.parse(await file.text());
     const m=await ensureModel();
-    m.loadWeights(saved);
-    state.modelVersion=m.version;state.weights=[...m.weights];
-    saveState({pairCount:state.pairs.length,modelVersion:m.version,weights:[...m.weights],losses:state.losses});
+    await m.loadWeights(files);
+    m.version++;
+    state.modelVersion=m.version;
+    await m.saveToBrowserStorage();
+    saveState({pairCount:state.pairs.length,modelVersion:m.version,losses:state.losses});
     $("#version").textContent="v"+m.version;
     $("#modelBadge").textContent="MODEL v"+m.version;
+    $("#modelParams").textContent=m.parameterCount;
     btn.textContent="Imported v"+m.version;
     setTimeout(()=>btn.textContent="Import model",1500);
   }catch(error){
@@ -265,6 +271,6 @@ $("#importInput").onchange=async e=>{
 };
 
 (async()=>{
-  try{await ensureModel()}catch(error){$("#engineStatus").textContent="WebGPU unavailable"}
+  try{await ensureModel()}catch(error){$("#engineStatus").textContent="Model engine unavailable: "+error.message}
   render();updatePairButton();
 })();

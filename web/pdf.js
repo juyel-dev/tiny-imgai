@@ -1,3 +1,5 @@
+import { renderPdfPageToCanvas } from "../core/render.js";
+
 const PDFJS_MODULE="https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.mjs";
 const PDFJS_WORKER="https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs";
 let libraryPromise=null;
@@ -33,15 +35,7 @@ export async function disposePdf(pdf){
 }
 
 export async function renderPdfPage(pdf,pageNumber,size=32){
-  const page=await pdf.getPage(pageNumber);
-  const base=page.getViewport({scale:1});
-  const scale=Math.min(size/base.width,size/base.height);
-  const viewport=page.getViewport({scale});
-  const canvas=document.createElement("canvas");
-  canvas.width=size;canvas.height=size;
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  ctx.fillStyle="#fff";ctx.fillRect(0,0,size,size);
-  const x=(size-viewport.width)/2,y=(size-viewport.height)/2;
-  await page.render({canvasContext:ctx,viewport,transform:[1,0,0,1,x,y]}).promise;
-  return canvas;
+  return renderPdfPageToCanvas(pdf,pageNumber,size,(w,h)=>{
+    const c=document.createElement("canvas");c.width=w;c.height=h;return c;
+  });
 }

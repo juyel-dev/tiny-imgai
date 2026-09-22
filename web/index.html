@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0b0d10">
   <title>tiny-imgai — Training Lab</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -95,11 +96,12 @@
       <div class="model-info"><span>Parameters</span><b id="modelParams">—</b></div>
       <div class="model-info"><span>Model size</span><b id="modelSize">—</b></div>
       <div class="model-info"><span>Architecture</span><b id="modelArch">—</b></div>
-      <div class="model-info"><span>Runtime</span><b>WebGPU</b></div>
+      <div class="model-info"><span>Runtime</span><b id="modelRuntime">tf.js (auto backend)</b></div>
       <hr>
       <button class="secondary" id="exportBtn">Export model</button>
       <button class="ghost" id="importBtn">Import model</button>
-      <input id="importInput" type="file" accept="application/json,.json" hidden>
+      <small class="import-hint">Select both the .json and .bin file together</small>
+      <input id="importInput" type="file" accept="application/json,.json,.bin" multiple hidden>
     </aside>
   </main>
 
