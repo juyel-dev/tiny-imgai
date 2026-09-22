@@ -237,7 +237,7 @@ trainBtn.onclick = () => {
   $("#lossHint").textContent = "PDF preparation + training are running outside the UI thread";
   $("#progress").style.width = "0%";
 
-  trainingWorker = new Worker("./train-worker.js", { type: "module" });
+  trainingWorker = new Worker(new URL("./train-worker.js", import.meta.url), { type: "module" });
 
   trainingWorker.onmessage = (event) => {
     const msg = event.data || {};
@@ -331,7 +331,8 @@ trainBtn.onclick = () => {
     console.error("[tiny-imgai worker error]", error);
     state.training = false;
     setTrainingStatus("Training worker crashed");
-    $("#lossHint").textContent = "The background trainer stopped unexpectedly.";
+    $("#lossHint").textContent =
+      error?.message || "The background trainer stopped unexpectedly.";
     finishTrainingWorker();
     render();
     updatePairButton();
