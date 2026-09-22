@@ -211,8 +211,7 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"
-Saved: {json_path}")
+    print(f"\nSaved: {json_path}")
     print(f"Saved: {csv_path}")
     return 0
 
