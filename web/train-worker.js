@@ -1,131 +1,5 @@
-import { TinyImageModel, INPUT_SIZE, canvasToRGB8 } from "./model.js";
-import { getDocument, getCachedPage, cachePage } from "./dataset.js";
-import { renderPdfPageToCanvas } from "../core/render.js";
-
-const PDFJS_MODULE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.mjs";
-let pdfjsPromise = null;
-
-async function loadPdfJs() {
-  if (!pdfjsPromise) {
-    pdfjsPromise = import(PDFJS_MODULE).then((lib) => {
-      // PDF.js still consults GlobalWorkerOptions.workerSrc in worker
-      // contexts while resolving its document worker machinery. Supplying
-      // the official worker module avoids the otherwise-fatal "No
-      // GlobalWorkerOptions.workerSrc specified" error. We still pass
-      // disableWorker below so PDF parsing stays inside this training worker.
-      lib.GlobalWorkerOptions.workerSrc =
-        "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs";
-      return lib;
-    });
-  }
-  return pdfjsPromise;
-}
-
-async function openPdfInWorker(blob) {
-  const lib = await loadPdfJs();
-  const data = new Uint8Array(await blob.arrayBuffer());
-  return lib.getDocument({ data, disableWorker: true }).promise;
-}
-
-function releaseCanvas(canvas) {
-  if (!canvas) return;
-  canvas.width = 0;
-  canvas.height = 0;
-}
-
-async function renderPage(pdf, pageNumber, size) {
-  if (typeof OffscreenCanvas !== "function") {
-    throw new Error("OffscreenCanvas is unavailable in this browser.");
-  }
-
-  return renderPdfPageToCanvas(
-    pdf,
-    pageNumber,
-    size,
-    (w, h) => new OffscreenCanvas(w, h)
-  );
-}
-
-function groupedPairs(pairs) {
-  const groups = new Map();
-  for (const p of pairs) {
-    if (!p.originalDocId || !p.processedDocId) continue;
-    const key = p.originalDocId + "|" + p.processedDocId;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  }
-  return groups;
-}
-
-async function prepareDataset(pairs) {
-  const groups = groupedPairs(pairs);
-  if (!groups.size) throw new Error("No PDF-backed training pairs found.");
-
-  const allPairs = [...groups.values()].flat();
-  const trainingData = new Map();
-  let created = 0;
-
-  self.postMessage({ type: "phase", phase: "prepare", total: allPairs.length });
-
-  for (const group of groups.values()) {
-    const first = group[0];
-    const [od, pd] = await Promise.all([
-      getDocument(first.originalDocId),
-      getDocument(first.processedDocId),
-    ]);
-
-    const [opdf, ppdf] = await Promise.all([
-      openPdfInWorker(od.blob),
-      openPdfInWorker(pd.blob),
-    ]);
-
-    try {
-      for (const pair of group) {
-        let cached = await getCachedPage(pair.uuid);
-
-        if (!(cached?.size === INPUT_SIZE && cached.original && cached.target)) {
-          const originalCanvas = await renderPage(opdf, pair.originalPage, INPUT_SIZE);
-          const original = canvasToRGB8(originalCanvas);
-          releaseCanvas(originalCanvas);
-
-          const targetCanvas = await renderPage(ppdf, pair.processedPage, INPUT_SIZE);
-          const target = canvasToRGB8(targetCanvas);
-          releaseCanvas(targetCanvas);
-
-          cached = await cachePage(pair.uuid, {
-            size: INPUT_SIZE,
-            original,
-            target,
-          });
-          created++;
-        }
-
-        trainingData.set(pair.uuid, {
-          original: new Uint8Array(cached.original),
-          target: new Uint8Array(cached.target),
-        });
-
-        const completed = trainingData.size;
-        if (completed === 1 || completed % 10 === 0 || completed === allPairs.length) {
-          self.postMessage({
-            type: "progress",
-            phase: "prepare",
-            completed,
-            total: allPairs.length,
-            created,
-          });
-        }
-      }
-    } finally {
-      await Promise.allSettled([
-        typeof opdf.destroy === "function" ? opdf.destroy() : opdf.cleanup?.(),
-        typeof ppdf.destroy === "function" ? ppdf.destroy() : ppdf.cleanup?.(),
-      ]);
-    }
-  }
-
-  return { allPairs, trainingData, created };
-}
+import { TinyImageModel, INPUT_SIZE } from "./model.js";
+import { getCachedPage } from "./dataset.js";
 
 async function setupTensorFlow() {
   const tf = await import("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/+esm");
@@ -154,6 +28,44 @@ function memorySnapshot(tf, stage) {
   };
 }
 
+async function loadCachedDataset(pairs) {
+  const trainingData = new Map();
+  const allPairs = pairs.filter((p) => p.originalDocId && p.processedDocId);
+
+  if (!allPairs.length) throw new Error("No PDF-backed training pairs found.");
+
+  self.postMessage({ type: "phase", phase: "cache", total: allPairs.length });
+
+  let prepared = 0;
+  let bytes = 0;
+
+  for (const pair of allPairs) {
+    const cached = await getCachedPage(pair.uuid);
+
+    if (!(cached?.size === INPUT_SIZE && cached.original && cached.target)) {
+      throw new Error("Missing cached page " + pair.pageNumber + ". Reload and create the page cache first.");
+    }
+
+    const original = new Uint8Array(cached.original);
+    const target = new Uint8Array(cached.target);
+
+    trainingData.set(pair.uuid, { original, target });
+    bytes += original.byteLength + target.byteLength;
+    prepared++;
+
+    if (prepared === 1 || prepared % 10 === 0 || prepared === allPairs.length) {
+      self.postMessage({
+        type: "progress",
+        phase: "cache",
+        completed: prepared,
+        total: allPairs.length,
+      });
+    }
+  }
+
+  return { allPairs, trainingData, bytes };
+}
+
 async function runTraining(pairs) {
   const { tf, backend } = await setupTensorFlow();
   const model = new TinyImageModel({ version: 0 });
@@ -173,7 +85,7 @@ async function runTraining(pairs) {
       memory: memorySnapshot(tf, "model-ready"),
     });
 
-    const prepared = await prepareDataset(pairs);
+    const prepared = await loadCachedDataset(pairs);
     const allPairs = prepared.allPairs;
     const trainingData = prepared.trainingData;
 
@@ -184,12 +96,8 @@ async function runTraining(pairs) {
       type: "phase",
       phase: "training",
       total: allPairs.length,
-      created: prepared.created,
       batchSize,
-      memoryBytes: [...trainingData.values()].reduce(
-        (sum, item) => sum + item.original.byteLength + item.target.byteLength,
-        0
-      ),
+      memoryBytes: prepared.bytes,
     });
 
     for (let epoch = 1; epoch <= epochs; epoch++) {
@@ -219,13 +127,13 @@ async function runTraining(pairs) {
               completed,
               total: allPairs.length,
               loss,
-              memory: memorySnapshot(tf, `train-e${epoch}-p${completed}`),
+              memory: memorySnapshot(tf, "train-e" + epoch + "-p" + completed),
             });
           }
         } catch (error) {
           const message = error?.message || String(error);
           throw new Error(
-            `Training failed at epoch ${epoch}, page ${start + 1}: ${message}`,
+            "Training failed at epoch " + epoch + ", page " + (start + 1) + ": " + message,
             { cause: error }
           );
         }
@@ -248,7 +156,7 @@ async function runTraining(pairs) {
         epoch,
         epochs,
         loss: avgLoss,
-        memory: memorySnapshot(tf, `checkpoint-${epoch}`),
+        memory: memorySnapshot(tf, "checkpoint-" + epoch),
       });
     }
 
