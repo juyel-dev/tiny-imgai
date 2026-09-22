@@ -113,4 +113,7 @@ The launcher uses **256×256**, **batch 1**, and a **30-minute run budget** by d
 .\\train-local.ps1 -MaxMinutes 60 -BatchSize 1
 ````
 
-The browser is not involved in training. The local Node trainer uses the native TensorFlow.js Node backend when it is available, otherwise it falls back to the pure JavaScript CPU backend.
+The browser and Node.js are not involved in training. The local Node trainer uses the native TensorFlow.js Node backend when it is available, otherwise it falls back to the pure JavaScript CPU backend.
+
+
+Python scans `data/originals` and `data/processed` directly and matches PDFs by filename, so the local training workflow does not require the Node.js trainer or `manifest.json`.
