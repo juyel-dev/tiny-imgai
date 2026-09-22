@@ -7,3 +7,7 @@
 .image-test-dropzone button{margin-top:5px}
 .image-test-dropzone input{display:none}
 .preview .primary{margin-top:12px}
+.production-note{margin-top:10px;border-top:1px solid #242a30;padding-top:13px;text-align:center}
+.production-note strong{display:block;font-size:12px;color:#dce1e7;margin-bottom:4px}
+.production-note span{display:block;font-size:11px;color:#8a949f}
+.production-note small{display:block;font-size:10px;line-height:1.5;color:#59636e;margin-top:6px}
