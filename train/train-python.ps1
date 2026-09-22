@@ -50,13 +50,6 @@ if ($LASTEXITCODE -ne 0) {
 New-Item -ItemType Directory -Force ".\data\originals" | Out-Null
 New-Item -ItemType Directory -Force ".\data\processed" | Out-Null
 
-Write-Host ""
-Write-Host "Building dataset manifest..." -ForegroundColor Yellow
-node .\build-manifest.js
-if ($LASTEXITCODE -ne 0) {
-  throw "Manifest build failed."
-}
-
 $Args = @(
   ".\train.py",
   "--max-minutes", "$MaxMinutes",
