@@ -1,0 +1,17 @@
+{
+  "name": "tiny-imgai-train",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-manifest": "node build-manifest.js",
+    "train": "node train.js"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.53",
+    "@tensorflow/tfjs": "^4.20.0",
+    "pdfjs-dist": "^4.6.82"
+  },
+  "optionalDependencies": {
+    "@tensorflow/tfjs-node": "^4.20.0"
+  }
+}

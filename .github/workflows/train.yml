@@ -1,0 +1,67 @@
+name: Train tiny-imgai model
+
+# Manually triggered on purpose — training is a deliberate, resumable
+# action, not something that should fire on every push. Each run picks
+# up from train/checkpoints/model (if present) and trains for up to
+# max_minutes, then commits the updated checkpoint back to the repo.
+# Trigger again (same inputs or different) to keep resuming.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_minutes:
+        description: "Wall-clock budget for this run (minutes). Keep comfortably under the job timeout below."
+        default: "330"
+      epochs:
+        description: "Target epoch to reach (training resumes toward this, does nothing if already reached)"
+        default: "1000"
+      batch_size:
+        description: "Pages per gradient step"
+        default: "4"
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: train/package-lock.json
+
+      - name: Install dependencies
+        working-directory: train
+        run: npm ci
+
+      # @tensorflow/tfjs-node is an optionalDependency — if its native
+      # binary fails to download (rare, but possible on some runners),
+      # `npm ci` still succeeds and train.js falls back to the pure-JS
+      # cpu backend automatically. No manual handling needed here.
+
+      - name: Build dataset manifest
+        working-directory: train
+        run: node build-manifest.js
+
+      - name: Train
+        working-directory: train
+        env:
+          MAX_MINUTES: ${{ github.event.inputs.max_minutes }}
+          EPOCHS: ${{ github.event.inputs.epochs }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size }}
+        run: node train.js
+
+      - name: Commit updated checkpoint
+        run: |
+          git config user.name "tiny-imgai-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add train/checkpoints
+          git diff --cached --quiet || git commit -m "Training checkpoint [skip ci]"
+          git push
