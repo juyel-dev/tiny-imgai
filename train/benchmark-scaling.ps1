@@ -4,7 +4,7 @@ param(
   [int]$Steps = 8,
   [int]$Threads = 6,
   [int]$MinFreeRamMiB = 768,
-  [int]$MaxRssMiB = 3072
+  [int]$MaxRssMiB = 1536
 )
 
 $ErrorActionPreference = "Stop"
