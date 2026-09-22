@@ -181,8 +181,7 @@ def main() -> int:
     ok = [r for r in rows if r["status"] == "OK"]
     ok.sort(key=lambda r: float(r["page_s"]))
 
-    print("
-=== sustained ranking ===")
+    print("\n=== sustained ranking ===")
     for r in ok:
         print(
             f"{r['page_s']}s/page | {r['threads']} threads | batch {r['batch']} | "
