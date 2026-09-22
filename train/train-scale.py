@@ -409,8 +409,7 @@ def main() -> int:
     print(f"BatchNorm layers finalized: {bn_count}")
     print(f"Final checkpoint: {checkpoint_path}")
     print(f"Finalization report: {final_report}")
-    print("
-Training target reached.")
+    print("\nTraining target reached.")
     return 0
 
 
