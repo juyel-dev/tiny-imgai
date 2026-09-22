@@ -117,3 +117,17 @@ The browser and Node.js are not involved in training. The local Node trainer use
 
 
 Python scans `data/originals` and `data/processed` directly and matches PDFs by filename, so the local training workflow does not require the Node.js trainer or `manifest.json`.
+
+
+## CPU setup benchmark
+
+Before committing to a long run, benchmark laptop configurations locally:
+
+```powershell
+cd "C:\Users\JUYEL\Documents\tiny-imgai\train"
+.\benchmark-setup.ps1
+```
+
+The benchmark keeps the model and **256×256** input fixed and compares CPU thread counts, batch 1/2, and contiguous vs channels-last memory layout. It runs only a few measured steps and saves CSV/JSON results under `train/benchmarks/`.
+
+`torch.compile` is intentionally not part of the default matrix. PyTorch documents compilation as having a significant first-call compilation cost, so it should be tested separately after the eager CPU baseline is measured. citeturn396781search0turn396781search6
