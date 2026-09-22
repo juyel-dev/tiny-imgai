@@ -15,12 +15,17 @@ pairs, no server, no cloud AI API.
 .github/workflows/train.yml   Manually-triggered, resumable training runs.
 ```
 
-## ⚠️ Deployment note
+## Deployment (Vercel)
 
-`index.html` moved from the repo root into `/web/`. **Update the
-Vercel project's Root Directory setting to `web`** (Project Settings →
-General → Root Directory) or the live deploy will 404 on the next
-build.
+**Root Directory must stay at the repo default (blank) — do NOT set it to
+`web`.** `web/model.js` and `web/pdf.js` import from `/core` (shared with
+`/train`), which sits *outside* `web/`. Vercel's Root Directory setting
+excludes everything outside it from the deployment, so setting it to `web`
+breaks those imports and the app fails to load.
+
+`vercel.json` at the repo root handles routing instead: it rewrites `/` to
+`/web/index.html` while the whole repo (including `/core`) stays deployed
+and reachable at its normal path.
 
 ## Status
 
