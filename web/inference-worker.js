@@ -51,13 +51,14 @@ async function init() {
     model = await tf.loadLayersModel(MODEL_URL);
 
     if (model.countParams() !== EXPECTED_PARAMS) {
+      const actualParams = model.countParams();
       model.dispose();
       model = null;
       throw new Error(
         "Production model parameter mismatch: expected " +
           EXPECTED_PARAMS +
           ", got " +
-          model.countParams()
+          actualParams
       );
     }
 
