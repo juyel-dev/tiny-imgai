@@ -54,8 +54,13 @@ async function main() {
   const specs = metadata.weight_specs;
   const modelWeights = model.weights;
 
-  if (model.countParams() !== 4383075) {
-    throw new Error("Unexpected b48 parameter count: " + model.countParams());
+  if (model.countParams() !== metadata.exported_values) {
+    throw new Error(
+      "tf.js/exported weight count mismatch: model=" +
+      model.countParams() +
+      " staging=" +
+      metadata.exported_values
+    );
   }
   if (modelWeights.length !== specs.length) {
     throw new Error(
