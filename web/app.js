@@ -341,28 +341,26 @@ trainBtn.onclick = async () => {
             processedPairs += batchPairs.length;
             completedBatches++;
 
-            $("#step").textContent = (epoch - 1) * totalBatches + completedBatches;
-            $("#epoch").textContent = `${epoch} / ${epochs}`;
-            $("#loss").textContent = loss.toFixed(5);
-            $("#progress").style.width =
-              (completedBatches / totalBatches * 100) + "%";
-            $("#trainStatus").textContent =
-              `Training batch ${completedBatches}/${totalBatches}`;
-
-            if (
+            const shouldUpdateUi =
               completedBatches === 1 ||
-              completedBatches % 10 === 0 ||
-              completedBatches === totalBatches
-            ) {
+              completedBatches % 8 === 0 ||
+              completedBatches === totalBatches;
+
+            if (shouldUpdateUi) {
+              $("#step").textContent = (epoch - 1) * totalBatches + completedBatches;
+              $("#epoch").textContent = `${epoch} / ${epochs}`;
+              $("#loss").textContent = loss.toFixed(5);
+              $("#progress").style.width =
+                (completedBatches / totalBatches * 100) + "%";
+              $("#trainStatus").textContent =
+                `Training batch ${completedBatches}/${totalBatches}`;
               reportMemory(`train-e${epoch}-b${completedBatches}`);
             }
           } finally {
             batch.length = 0;
           }
 
-          // Yield often enough for UI updates, but don't force a
-          // full animation frame wait after every training batch.
-          if (completedBatches % 4 === 0 || completedBatches === totalBatches) {
+          if (shouldUpdateUi) {
             await new Promise(requestAnimationFrame);
           }
         }
