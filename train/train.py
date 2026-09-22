@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import numpy as np
 import torch
 from torch import nn
