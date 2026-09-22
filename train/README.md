@@ -90,3 +90,29 @@ installs deps, builds the manifest, trains for `max_minutes`, then
 commits the updated checkpoint back to `main`. Public repo = free,
 unlimited-minute runners. Trigger it again any time to keep training
 where the last run left off.
+
+## Windows / PowerShell laptop mode
+
+For local training on Windows, put matching PDFs in:
+
+```
+train/data/originals/<id>.pdf
+train/data/processed/<id>.pdf
+```
+
+Then from PowerShell:
+
+``
+powershell
+cd .\\train
+.\\train-local.ps1
+```
+
+The launcher uses **256×256**, **batch 1**, and a **30-minute run budget** by default. The run resumes from `train/checkpoints/model/` on the next start. You can change the budget without editing code:
+
+``
+powershell
+.\\train-local.ps1 -MaxMinutes 60 -BatchSize 1
+```
+
+The browser is not involved in training. The local Node trainer uses the native TensorFlow.js Node backend when it is available, otherwise it falls back to the pure JavaScript CPU backend.
