@@ -468,6 +468,7 @@ def main() -> int:
         model,
         optimizer,
         signature,
+        args.loss_profile,
     )
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
