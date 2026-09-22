@@ -156,23 +156,44 @@ class PageRecord:
 
 
 def load_manifest(data_dir: Path) -> tuple[dict, list[PageRecord]]:
-    manifest_path = data_dir / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"No manifest.json in {data_dir}")
+    originals_dir = data_dir / "originals"
+    processed_dir = data_dir / "processed"
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not originals_dir.exists() or not processed_dir.exists():
+        raise FileNotFoundError(
+            f"Expected PDF folders: {originals_dir} and {processed_dir}"
+        )
+
+    original_files = {
+        p.stem: p for p in originals_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".pdf"
+    }
+    processed_files = {
+        p.stem: p for p in processed_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".pdf"
+    }
+
+    matched_ids = sorted(set(original_files) & set(processed_files))
+    if not matched_ids:
+        raise ValueError(
+            f"No matching PDF pairs found in {originals_dir} and {processed_dir}."
+        )
+
+    missing_processed = sorted(set(original_files) - set(processed_files))
+    missing_original = sorted(set(processed_files) - set(original_files))
+
+    for pair_id in missing_processed[:10]:
+        print(f"Missing processed PDF for: {pair_id}")
+    for pair_id in missing_original[:10]:
+        print(f"Missing original PDF for: {pair_id}")
+
     page_records: list[PageRecord] = []
+    manifest_pairs = []
     page_number = 0
 
-    for doc_pair in manifest.get("pairs", []):
-        pair_id = str(doc_pair["id"])
-        original_pdf = data_dir / str(doc_pair["originalPdf"])
-        processed_pdf = data_dir / str(doc_pair["processedPdf"])
-
-        if not original_pdf.exists():
-            raise FileNotFoundError(f"Missing original PDF: {original_pdf}")
-        if not processed_pdf.exists():
-            raise FileNotFoundError(f"Missing processed PDF: {processed_pdf}")
+    for pair_id in matched_ids:
+        original_pdf = original_files[pair_id]
+        processed_pdf = processed_files[pair_id]
 
         with fitz.open(original_pdf) as original_doc, fitz.open(processed_pdf) as processed_doc:
             original_count = original_doc.page_count
@@ -188,6 +209,13 @@ def load_manifest(data_dir: Path) -> tuple[dict, list[PageRecord]]:
                 f"— using first {count} page(s)"
             )
 
+        manifest_pairs.append({
+            "id": pair_id,
+            "originalPdf": f"originals/{original_pdf.name}",
+            "processedPdf": f"processed/{processed_pdf.name}",
+            "pageCount": count,
+        })
+
         for page_index in range(1, count + 1):
             page_number += 1
             page_records.append(
@@ -200,6 +228,12 @@ def load_manifest(data_dir: Path) -> tuple[dict, list[PageRecord]]:
                     processed_pdf=processed_pdf,
                 )
             )
+
+    manifest = {
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "pairCount": len(manifest_pairs),
+        "pairs": manifest_pairs,
+    }
 
     return manifest, page_records
 
