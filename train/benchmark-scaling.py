@@ -17,8 +17,8 @@ from losses import PrintCleanLoss
 from model_scalable import ScaledTinyUNet, describe
 from train import build_cache, load_manifest, load_page_tensor
 
-WIDTHS = [16, 24, 32, 40, 48]
-CHECKPOINTING = [False, True]
+WIDTHS = [16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104]
+CHECKPOINTING = [False]
 INPUT_SIZE = 512
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--steps", type=int, default=8)
     p.add_argument("--threads", type=int, default=6)
     p.add_argument("--min-free-ram-mib", type=int, default=768)
-    p.add_argument("--max-rss-mib", type=int, default=3072)
+    p.add_argument("--max-rss-mib", type=int, default=1536)
     return p.parse_args()
 
 def check_memory(process: psutil.Process, args: argparse.Namespace) -> dict:
@@ -119,7 +119,7 @@ def main() -> int:
     print(f"CPU threads: {args.threads}")
     print(f"Pages: {len(records)}")
     print(f"Widths: {WIDTHS}")
-    print("Checkpointing: off/on")
+    print("Checkpointing: OFF (already measured; not useful for this CPU)")
     print(f"RAM hard-stop: < {args.min_free_ram_mib} MiB available or > {args.max_rss_mib} MiB process RSS")
     print()
     build_cache(records, cache_root, INPUT_SIZE)
