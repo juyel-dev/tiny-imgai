@@ -145,9 +145,7 @@ function memorySnapshot(tf, stage) {
 
 async function runTraining(pairs) {
   const { tf, backend } = await setupTensorFlow();
-  const model = new TinyImageModel({
-    version: 0,
-  });
+  const model = new TinyImageModel({ version: 0 });
 
   try {
     try {
@@ -199,7 +197,7 @@ async function runTraining(pairs) {
           );
           epochLoss += loss;
           processed++;
-          
+
           const completed = start + 1;
           if (completed === 1 || completed % 10 === 0 || completed === allPairs.length) {
             self.postMessage({
@@ -214,8 +212,11 @@ async function runTraining(pairs) {
             });
           }
         } catch (error) {
-          error.message = `Training failed at epoch ${epoch}, page ${start + 1}: ${error.message}`;
-          throw error;
+          const message = error?.message || String(error);
+          throw new Error(
+            `Training failed at epoch ${epoch}, page ${start + 1}: ${message}`,
+            { cause: error }
+          );
         }
       }
 
@@ -241,14 +242,16 @@ async function runTraining(pairs) {
     }
 
     const finalVersion = model.version;
-    model.dispose();
     self.postMessage({
       type: "done",
       version: finalVersion,
       backend,
       memory: memorySnapshot(tf, "done"),
     });
+  } finally {
+    model.dispose();
   }
+}
 
 self.addEventListener("message", async (event) => {
   if (!event.data || event.data.type !== "start") return;
