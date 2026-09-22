@@ -71,13 +71,17 @@ async function main() {
 
   const tensors = [];
   try {
-    for (let i = 0; i < specs.length; i++) {
+    // TensorFlow.js orders trainable weights before non-trainable BatchNorm
+    // moving statistics. The PyTorch staging file is intentionally grouped
+    // per block, so bind by exact weight name rather than array position.
+    const specsByName = new Map(specs.map((spec) => [spec.name, spec]));
+
+    for (let i = 0; i < modelWeights.length; i++) {
       const expected = modelWeights[i];
-      const spec = specs[i];
-      if (expected.name !== spec.name) {
+      const spec = specsByName.get(expected.name);
+      if (!spec) {
         throw new Error(
-          "Weight name mismatch at " + i + ": expected " +
-          expected.name + ", got " + spec.name
+          "Missing staged weight for tf.js weight " + expected.name
         );
       }
       if (expected.shape.join(",") !== spec.shape.join(",")) {
@@ -88,6 +92,13 @@ async function main() {
         );
       }
       tensors.push(makeTensor(weightData, spec));
+    }
+
+    if (specsByName.size !== modelWeights.length) {
+      throw new Error(
+        "Weight count mismatch: tf.js=" + modelWeights.length +
+        " unique staging=" + specsByName.size
+      );
     }
 
     model.setWeights(tensors);
