@@ -179,25 +179,31 @@ async function ensureModel() {
       throw new Error("tf.js did not load (check network / ad-blocker / CDN access)");
     }
 
-    model = new TinyImageModel({
+    const candidate = new TinyImageModel({
       version: state.modelVersion ?? 3,
       mode: "production",
     });
 
-    setTrainingStatus("Loading 512×512 production model…");
-    const metadata = await model.loadProductionModel();
+    try {
+      setTrainingStatus("Loading 512×512 production model…");
+      const metadata = await candidate.loadProductionModel();
 
-    $("#engineStatus").textContent = "tf.js backend: " + tf.getBackend();
-    $("#modelRuntime").textContent = tf.getBackend() + " · production";
-    $("#version").textContent = "v" + model.version;
-    $("#modelBadge").textContent = "PRODUCTION v" + model.version;
-    $("#modelParams").textContent = model.parameterCount.toLocaleString();
-    $("#modelSize").textContent =
-      (model.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
-    $("#modelArch").textContent = model.architecture;
-    $("#trainStatus").textContent =
-      "Production model loaded · " +
-      (Number(metadata.pages_evaluated || 335) ? "512px inference ready" : "inference ready");
+      model = candidate;
+      $("#engineStatus").textContent = "tf.js backend: " + tf.getBackend();
+      $("#modelRuntime").textContent = tf.getBackend() + " · production";
+      $("#version").textContent = "v" + model.version;
+      $("#modelBadge").textContent = "PRODUCTION v" + model.version;
+      $("#modelParams").textContent = model.parameterCount.toLocaleString();
+      $("#modelSize").textContent =
+        (model.parameterCount * 4 / 1048576).toFixed(2) + " MiB";
+      $("#modelArch").textContent = model.architecture;
+      $("#trainStatus").textContent =
+        "Production model loaded · 512px inference ready";
+      return model;
+    } catch (error) {
+      candidate.dispose();
+      throw error;
+    }
   }
 
   return model;
