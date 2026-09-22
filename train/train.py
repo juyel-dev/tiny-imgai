@@ -175,16 +175,18 @@ def load_manifest(data_dir: Path) -> tuple[dict, list[PageRecord]]:
             raise FileNotFoundError(f"Missing processed PDF: {processed_pdf}")
 
         with fitz.open(original_pdf) as original_doc, fitz.open(processed_pdf) as processed_doc:
-            count = min(original_doc.page_count, processed_doc.page_count)
+            original_count = original_doc.page_count
+            processed_count = processed_doc.page_count
 
+        count = min(original_count, processed_count)
         if count <= 0:
             continue
 
-        if original_doc_count := None:
-            pass
-
-        if count != min(original_doc.page_count, processed_doc.page_count):
-            raise RuntimeError("Unexpected page-count state.")
+        if original_count != processed_count:
+            print(
+                f"[{pair_id}] page count mismatch ({original_count} vs {processed_count}) "
+                f"— using first {count} page(s)"
+            )
 
         for page_index in range(1, count + 1):
             page_number += 1
@@ -218,6 +220,15 @@ def render_page(pdf: fitz.Document, page_number: int, size: int) -> np.ndarray:
     return np.ascontiguousarray(canvas)
 
 
+
+def validate_cache_shape(path: Path, input_size: int) -> bool:
+    try:
+        array = np.load(path, mmap_mode="r")
+        return array.dtype == np.uint8 and array.shape == (input_size, input_size, 3)
+    except (OSError, ValueError):
+        return False
+
+
 def build_cache(records: list[PageRecord], cache_root: Path, input_size: int) -> None:
     cache_root.mkdir(parents=True, exist_ok=True)
 
@@ -237,8 +248,8 @@ def build_cache(records: list[PageRecord], cache_root: Path, input_size: int) ->
                 if (
                     original_cache.exists()
                     and processed_cache.exists()
-                    and np.load(original_cache, mmap_mode="r").shape == (input_size, input_size, 3)
-                    and np.load(processed_cache, mmap_mode="r").shape == (input_size, input_size, 3)
+                    and validate_cache_shape(original_cache, input_size)
+                    and validate_cache_shape(processed_cache, input_size)
                 ):
                     continue
 
